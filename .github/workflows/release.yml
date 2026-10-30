@@ -27,13 +27,13 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: 安装 Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
@@ -114,7 +114,7 @@ jobs:
           echo "请在仓库 Settings → Secrets and variables → Actions 中添加 CWPT_TOKEN"
 
       - name: 创建 GitHub Release 并上传发布包
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: 课表同步 v${{ env.VERSION }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
