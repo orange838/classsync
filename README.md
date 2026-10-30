@@ -91,6 +91,20 @@ npx wrangler deploy
 2. 点「生成配对码」，拿到 6 位码
 3. 在插件设置页填入服务器地址、设备名称、配对码，点「绑定」
 
+## 自动部署服务端
+
+仓库已在 Cloudflare 控制台绑定 Git 集成（Workers → classsync → 设置 → 构建）：
+
+- 仓库 `orange838/classsync`，生产分支 `main`
+- 根目录填 `worker`，部署命令用默认的 `npx wrangler deploy`
+- 构建命令留空（服务端是零构建的原生 JS）
+
+所以**只要推送到 `main`，Cloudflare 就会自动构建并上线 Worker**，
+不用本地跑 `wrangler deploy`。构建失败时线上会保持上一个可用版本。
+
+> 注意：CF 的 Git 集成只监听分支推送，**打 tag 不会触发 Worker 部署**；
+> tag 触发的是下面「自动发布插件」里的插件打包流程。
+
 ## 自动发布插件
 
 仓库已配置好 GitHub Actions，打标签即可自动打包并发布到
