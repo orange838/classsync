@@ -1,0 +1,126 @@
+name: Release Plugin
+
+# 打 tag 即自动发布插件（格式：v主版本.次版本.修订号，如 v0.1.0）
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的版本标签，例如 v0.1.0'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # 插件在 monorepo 的 plugin/ 子目录
+  PLUGIN_DIR: plugin
+  PLUGIN_ID: org.cslblog.classsync
+  CWPT_TOKEN: ${{ secrets.CWPT_TOKEN }}
+
+jobs:
+  release:
+    name: 打包并发布
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装 Class Widgets SDK 工具
+        run: |
+          python -m pip install --upgrade pip
+          pip install class-widgets-sdk
+
+      - name: 确定版本号并同步到 cwplugin.json
+        run: |
+          REF="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${REF#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::标签 '$REF' 不是合法的 v主.次.修订 格式"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "发布版本：$VERSION"
+          python - "$VERSION" <<'PY'
+          import json, sys
+          from pathlib import Path
+          version = sys.argv[1]
+          path = Path("plugin/cwplugin.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          old = data.get("version")
+          data["version"] = version
+          path.write_text(
+              json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+          )
+          print(f"cwplugin.json version: {old} -> {version}")
+          PY
+
+      - name: 打包 .cwplugin 与 .zip
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: |
+          # 开发用的端到端测试脚本不随包发布
+          rm -f test_client.py
+          rm -rf __pycache__ _classsync/__pycache__
+          cw-plugin-pack . --format cwplugin
+          cw-plugin-pack . --format zip
+          mkdir -p ../dist
+          ls -1
+          mv ./*.cwplugin ./*.zip ../dist/
+
+      - name: 校验产物
+        run: |
+          set -e
+          ls -l dist
+          test -f "dist/${PLUGIN_ID}.cwplugin"
+          test -f "dist/${PLUGIN_ID}.zip"
+          python - <<'PY'
+          import json, os, zipfile
+
+          expect_version = os.environ["VERSION"]
+          expect_id = os.environ["PLUGIN_ID"]
+          for name in sorted(os.listdir("dist")):
+              path = os.path.join("dist", name)
+              with zipfile.ZipFile(path) as zf:
+                  names = zf.namelist()
+                  assert "cwplugin.json" in names, name + " 缺少 cwplugin.json"
+                  assert "main.py" in names, name + " 缺少 main.py"
+                  manifest = json.loads(zf.read("cwplugin.json").decode("utf-8"))
+              assert manifest["id"] == expect_id, name + " id 不匹配"
+              assert manifest["version"] == expect_version, name + " version 不匹配"
+              print(name, "->", len(names), "个文件, version =", manifest["version"])
+          PY
+
+      - name: 发布到 Class Widgets 插件广场
+        if: env.CWPT_TOKEN != ''
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: |
+          cw-plugin-publish . --branch main
+
+      - name: 提示未配置发布令牌
+        if: env.CWPT_TOKEN == ''
+        run: |
+          echo "::warning::未配置 CWPT_TOKEN，已跳过插件广场发布（仅创建 GitHub Release）"
+          echo "请在仓库 Settings → Secrets and variables → Actions 中添加 CWPT_TOKEN"
+
+      - name: 创建 GitHub Release 并上传发布包
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 课表同步 v${{ env.VERSION }}
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/*.cwplugin
+            dist/*.zip

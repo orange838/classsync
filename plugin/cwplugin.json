@@ -7,5 +7,6 @@
   "author": "cslblog",
   "description": "从自建服务器拉取课表，后台可实时查看各机器状态并手动发布课表",
   "readme": "README.md",
-  "icon": "icon.png"
+  "icon": "icon.png",
+  "url": "https://github.com/orange838/classsync"
 }

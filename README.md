@@ -11,6 +11,8 @@ Class Widgets 2 的**课表同步**方案：一个跑在 Cloudflare Workers + D1
 
 ```
 classsync/
+├── .github/workflows/
+│   └── release.yml          打 tag 自动打包发布插件
 ├── worker/                  Cloudflare Workers 服务端（JS，零构建依赖）
 │   ├── src/
 │   │   ├── index.js         原生路由
@@ -88,6 +90,37 @@ npx wrangler deploy
 1. 打开后台，用 `ADMIN_KEY` 登录
 2. 点「生成配对码」，拿到 6 位码
 3. 在插件设置页填入服务器地址、设备名称、配对码，点「绑定」
+
+## 自动发布插件
+
+仓库已配置好 GitHub Actions，打标签即可自动打包并发布到
+[Class Widgets 插件广场](https://plaza.cw.rinlit.cn/)。
+
+### 一次性准备
+
+1. 在 [插件广场控制台](https://plaza.cw.rinlit.cn/console) 注册插件 ID
+   `org.cslblog.classsync`，并创建发布令牌
+2. 在 GitHub 仓库 **Settings → Secrets and variables → Actions** 里
+   新建名为 `CWPT_TOKEN` 的 Secret，填入令牌
+
+### 发一个版本
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+标签必须是 `v主版本.次版本.修订号`（只支持数字，如 `v0.1.0`）。
+
+工作流会依次：
+
+1. 校验标签格式，把版本号同步进 `plugin/cwplugin.json`
+2. 用 `cw-plugin-pack` 生成 `org.cslblog.classsync.cwplugin` 与 `.zip`
+3. 解包校验产物里的清单、入口文件和版本号
+4. 用 `cw-plugin-publish` 发布到插件广场（没配 `CWPT_TOKEN` 则跳过，只出 Release）
+5. 创建 GitHub Release 并挂上两个包
+
+也可以在 Actions 页面手动触发 `Release Plugin`，输入标签名发布。
 
 ## 后台功能
 
