@@ -1,0 +1,11 @@
+{
+  "id": "org.cslblog.classsync",
+  "name": "课表同步",
+  "version": "0.1.0",
+  "api_version": ">=0.4.2",
+  "entry": "main.py",
+  "author": "cslblog",
+  "description": "从自建服务器拉取课表，后台可实时查看各机器状态并手动发布课表",
+  "readme": "README.md",
+  "icon": "icon.png"
+}

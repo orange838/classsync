@@ -1,0 +1,12 @@
+name = "classsync"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "classsync"
+database_id = "18c5813f-0eb6-473b-a247-00c2fb8f6781"
+
+[vars]
+# 管理密钥请在 Cloudflare 控制台的 Secret 里设置（不要写在这个文件里）
+# 变量名：ADMIN_KEY
