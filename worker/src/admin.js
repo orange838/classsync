@@ -143,7 +143,9 @@ export async function updateSettings(request, env) {
   const body = await request.json().catch(() => null);
   if (!body) return fail('请求体无效');
   if (body.poll_interval != null) {
-    const v = Math.min(Math.max(Number(body.poll_interval), 30), 86400);
+    // 下限 15 秒：两台设备 24 小时全开约 11,520 请求/天，占免费额度 11.5%
+    // Worker 免费额度是账号级共享的，再快会挤占其他项目
+    const v = Math.min(Math.max(Number(body.poll_interval), 15), 86400);
     await env.DB.prepare(
       'INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
     )

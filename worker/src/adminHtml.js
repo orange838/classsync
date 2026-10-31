@@ -78,11 +78,15 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
     <div style="display:flex;gap:10px;align-items:center">
       <input id="pollInput" style="max-width:160px" />
       <button id="savePoll">保存</button>
-      <span class="muted">建议 60–300；越小越实时，越费请求</span>
+      <span class="muted" id="pollHint">建议 60–300；最小 15 秒。越小越实时，越费请求</span>
     </div>
   </div>
   <div class="card">
-    <div class="row"><b>最近指令</b><button id="refreshBtn">刷新</button></div>
+    <div class="row">
+      <b>最近指令</b>
+      <span class="muted" id="autoHint" style="margin-left:auto;margin-right:12px">自动刷新已开启</span>
+      <button id="refreshBtn">刷新</button>
+    </div>
     <div id="cmdList" style="margin-top:8px"></div>
   </div>
 </div>
@@ -95,14 +99,17 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
       <button id="modalClose">关闭</button>
     </div>
     <hr>
-    <div class="muted" style="margin-bottom:8px">CW2 课表 JSON：包含 meta / subjects / days / overrides。改完先存草稿，确认无误再点发布。</div>
+    <div class="muted" style="margin-bottom:8px">CW2 课表 JSON：包含 meta / subjects / days / overrides。改完先存草稿，确认无误再点发布。<br>
+      手边有现成课表就点「导入本地文件」，直接选 <span class="mono">school.json</span>（便携版在 <span class="mono">CW2 目录\data\configs\schedules\</span>，普通版在 <span class="mono">%LOCALAPPDATA%\Class_Widgets_2\configs\schedules\</span>）。</div>
     <textarea id="schedText" spellcheck="false"></textarea>
     <div class="row" style="margin-top:12px">
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btnImport">导入本地文件</button>
         <button id="btnFormat">格式化校验</button>
         <button id="btnSaveDraft">保存草稿</button>
         <button class="primary" id="btnPublish">发布到设备</button>
       </div>
+      <input type="file" id="fileInput" accept=".json,application/json" style="display:none" />
       <span class="muted" id="draftInfo"></span>
     </div>
   </div>
@@ -185,6 +192,8 @@ function boot(){
       api('/api/admin/logout', {method:'POST'}).then(function(){ location.reload(); });
     };
     render();
+    scheduleAutoRefresh();
+    setAutoPaused(!!document.hidden);
   }).catch(function(){
     el('login').style.display = 'block';
     el('main').style.display = 'none';
@@ -204,7 +213,10 @@ function render(){
     box.innerHTML = '';
     state.devices.forEach(function(d){ box.appendChild(deviceCard(d)); });
   }
-  el('pollInput').value = state.settings.poll_interval || '120';
+  // 用户正在改轮询间隔时不要覆盖
+  if(document.activeElement !== el('pollInput')){
+    el('pollInput').value = state.settings.poll_interval || '30';
+  }
 
   var cmds = state.commands || [];
   if(!cmds.length){
@@ -297,9 +309,51 @@ function escapeHtml(s){
   });
 }
 
-function refresh(){
-  return api('/api/admin/state').then(function(j){ state = j; render(); });
+// 正在编辑课表时暂停自动刷新，避免吞掉未保存的内容
+function isEditing(){
+  return el('mask').classList.contains('show') || el('cmdMask').classList.contains('show');
 }
+
+function refresh(){
+  return api('/api/admin/state').then(function(j){
+    state = j;
+    // 编辑中不重绘，避免吞掉未保存的文本；关弹窗后会再刷一次
+    if(isEditing()) return;
+    render();
+  });
+}
+
+// 自动刷新逻辑：页面可登时每 15 秒拉一次
+var AUTO_REFRESH_SECONDS = 15;
+var autoTimer = null;
+var autoPaused = false;
+
+function setAutoPaused(paused){
+  autoPaused = paused;
+  var hint = el('autoHint');
+  if(!hint) return;
+  if(paused){
+    hint.textContent = '自动刷新已暂停（页面隐藏或正在编辑）';
+    hint.style.color = 'var(--warn, #d1a44a)';
+  } else {
+    hint.textContent = '自动刷新每 ' + AUTO_REFRESH_SECONDS + ' 秒';
+    hint.style.color = '';
+  }
+}
+
+function scheduleAutoRefresh(){
+  if(autoTimer) clearInterval(autoTimer);
+  autoTimer = setInterval(function(){
+    if(autoPaused || document.hidden || isEditing()) return;
+    if(el('login').style.display !== 'none') return;
+    refresh().catch(function(){ /* 失败不刷屏，等下一轮 */ });
+  }, AUTO_REFRESH_SECONDS * 1000);
+}
+
+document.addEventListener('visibilitychange', function(){
+  setAutoPaused(!!document.hidden);
+  if(!document.hidden) refresh().catch(function(){});
+});
 
 function openSchedule(d){
   currentDevice = d;
@@ -328,7 +382,28 @@ function parseSchedule(){
   return obj;
 }
 
-el('modalClose').onclick = function(){ el('mask').classList.remove('show'); };
+el('modalClose').onclick = function(){ el('mask').classList.remove('show'); refresh().catch(function(){}); };
+el('btnImport').onclick = function(){ el('fileInput').value = ''; el('fileInput').click(); };
+el('fileInput').onchange = function(){
+  var file = el('fileInput').files && el('fileInput').files[0];
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(){
+    try {
+      var obj = JSON.parse(String(reader.result || ''));
+      if(!obj || !obj.meta || !Array.isArray(obj.subjects) || !Array.isArray(obj.days)){
+        throw new Error('不是 CW2 课表（缺 meta / subjects / days）');
+      }
+      el('schedText').value = JSON.stringify(obj, null, 2);
+      var entries = obj.days.reduce(function(a, d){ return a + (d.entries||[]).length; }, 0);
+      el('draftInfo').textContent = '已导入 ' + file.name + '（未保存，记得点保存草稿或发布）';
+      toast('已导入：' + obj.subjects.length + ' 科目，' + entries + ' 节课');
+    } catch(e){ toast('导入失败：' + e.message); }
+  };
+  reader.onerror = function(){ toast('读取文件失败'); };
+  reader.readAsText(file, 'utf-8');
+};
+
 el('btnFormat').onclick = function(){
   try {
     var obj = parseSchedule();
@@ -361,12 +436,12 @@ function openCmd(d){
   el('cmdMask').classList.add('show');
   updateHint();
 }
-el('cmdClose').onclick = function(){ el('cmdMask').classList.remove('show'); };
+el('cmdClose').onclick = function(){ el('cmdMask').classList.remove('show'); refresh().catch(function(){}); };
 el('cmdType').onchange = updateHint;
 function updateHint(){
   var t = el('cmdType').value;
   var hints = {
-    sync_now: '让设备立刻发一次同步请求。',
+    sync_now: '请设备尽快发一次同步请求。设备平时在睡觉，要等它下一次心跳才会收到 —— 最长等一个轮询间隔。',
     upload_schedule: '让设备把当前课表传到后台草稿区，之后可以在这里改。',
     switch_portable: '在便携版和用户目录之间切换数据位置，然后重启程序。',
     restart_app: '直接重启 Class Widgets 2。'
@@ -381,7 +456,7 @@ function sendCommand(deviceId, type, payload){
 }
 el('cmdSend').onclick = function(){
   sendCommand(currentDevice.id, el('cmdType').value)
-    .then(function(){ toast('指令已排队，等设备下次同步'); el('cmdMask').classList.remove('show'); refresh(); })
+    .then(function(){ toast('指令已排队，等设备下次心跳（最长一个轮询间隔）'); el('cmdMask').classList.remove('show'); refresh(); })
     .catch(function(e){ toast(e.message); });
 };
 

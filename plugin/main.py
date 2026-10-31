@@ -300,7 +300,7 @@ class Plugin(CW2Plugin):
             self._config.device_id = str(data.get("device_id", ""))
             self._config.device_token = str(data.get("device_token", ""))
             self._config.device_name = str(data.get("device_name", ""))
-            self._config.poll_interval_seconds = int(data.get("poll_interval") or 120)
+            self._config.poll_interval_seconds = int(data.get("poll_interval") or 30)
             self._config.paired = True
             self._config.last_error = ""
             self._config.last_message = "配对成功"

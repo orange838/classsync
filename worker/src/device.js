@@ -56,7 +56,7 @@ export async function pairDevice(request, env) {
     .bind(now, deviceId, codeHash)
     .run();
 
-  const pollInterval = Number(await getSetting(env, 'poll_interval', '120'));
+  const pollInterval = Number(await getSetting(env, 'poll_interval', '30'));
 
   return ok({
     device_id: deviceId,
@@ -153,7 +153,7 @@ export async function syncDevice(request, env) {
     await env.DB.prepare('UPDATE commands SET status = ? WHERE id = ?').bind('sent', cmd.id).run();
   }
 
-  const pollInterval = Number(await getSetting(env, 'poll_interval', '120'));
+  const pollInterval = Number(await getSetting(env, 'poll_interval', '30'));
 
   return ok({
     server_time: nowIso(),

@@ -13,7 +13,7 @@ class ClassSyncConfig(ConfigBaseModel):
     paired: bool = False
 
     # 同步状态
-    poll_interval_seconds: int = 120
+    poll_interval_seconds: int = 30
     schedule_revision: int = 0
     schedule_hash: str = ""
     last_sync_time: str = ""
