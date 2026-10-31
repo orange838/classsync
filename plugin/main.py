@@ -401,6 +401,10 @@ class Plugin(CW2Plugin):
         ).hexdigest()[:32]
 
         previous = self._current_schedule_name()
+        # 第一次接管前记下用户自己在用的课表，之后“拉取本机课表”优先读它，
+        # 避免把下发的 _sync 当成用户原课表传回后台
+        if previous and previous != name and not self._config.baseline_schedule_name:
+            self._config.baseline_schedule_name = previous
         self._applying = True
         try:
             names = [
@@ -498,16 +502,27 @@ class Plugin(CW2Plugin):
                     acks.append({"id": command_id, "ok": True, "result": "立即同步"})
                     immediate = True
                 elif command_type == "upload_schedule":
-                    data = self._read_current_schedule_dict()
-                    if data:
-                        self._need_upload = {"request_id": command_id, "payload": data}
-                        acks.append({"id": command_id, "ok": True, "result": "已上传本机课表"})
+                    found = self._read_current_schedule_dict()
+                    if found:
+                        self._need_upload = {"request_id": command_id, "payload": found["data"]}
+                        acks.append(
+                            {
+                                "id": command_id,
+                                "ok": True,
+                                "result": f"已上传课表「{found['name']}」",
+                            }
+                        )
                         immediate = True
                     else:
                         acks.append({"id": command_id, "ok": False, "result": "读取本机课表失败"})
                 elif command_type == "switch_portable":
-                    message = self.doSwitchToPortable()
-                    ok = "已切换到便携版" in message
+                    # 按当前实际位置反向切换，和后台按钮文案一致
+                    if portable.current_location().portable:
+                        message = self.doSwitchBackToUserDir()
+                        ok = "已切回用户目录" in message
+                    else:
+                        message = self.doSwitchToPortable()
+                        ok = "已切换到便携版" in message
                     acks.append(
                         {"id": command_id, "ok": ok, "result": message.splitlines()[0][:200]}
                     )
@@ -536,26 +551,57 @@ class Plugin(CW2Plugin):
         # immediate 时由 _on_sync_finished 末尾的 interval=2 触发下一次同步
 
     def _read_current_schedule_dict(self) -> Optional[dict]:
+        """读“用户自己的课表”，返回 (课表名, 数据)；失败返回 None。
+
+        本地可能同时存在两套课表：下发的 `_sync` 和用户原来的。
+        默认读“正在使用”的那套，但当正在使用的就是 `_sync` 时，
+        改读首次接管前记下的原课表，避免把我们自己下发的内容又传回后台。
+        """
         try:
-            current = self._current_schedule_name()
             items = self.api.schedulemanagement.list() or []
-            target = None
-            for item in items:
-                if current and str(item.get("name")) == str(current):
-                    target = item
-                    break
-            if target is None and items:
-                target = items[0]
-            if target is None:
+            if not items:
                 return None
-            path = Path(str(target.get("path", "")))
+
+            by_name = {str(i.get("name")): i for i in items}
+            managed = self._config.managed_schedule_name or "_sync"
+            active = self._current_schedule_name()
+            baseline = self._config.baseline_schedule_name or ""
+
+            candidates = []
+            if active and active in by_name:
+                candidates.append(active)
+            if active == managed and baseline and baseline in by_name:
+                # 正在用的是 _sync，优先回退到原课表
+                candidates.insert(0, baseline)
+            if baseline and baseline in by_name:
+                candidates.append(baseline)
+            for name in by_name:
+                if name != managed:
+                    candidates.append(name)
+            seen = set()
+            for name in candidates:
+                if name in seen:
+                    continue
+                seen.add(name)
+                data = self._load_schedule_file(by_name[name])
+                if data is not None:
+                    return {"name": name, "data": data}
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"[ClassSync] 读取本机课表失败: {exc}")
+            return None
+
+    @staticmethod
+    def _load_schedule_file(item: dict) -> Optional[dict]:
+        try:
+            path = Path(str(item.get("path", "")))
             if not path.is_file():
                 return None
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
             return data if isinstance(data, dict) else None
         except Exception as exc:  # noqa: BLE001
-            logger.error(f"[ClassSync] 读取本机课表失败: {exc}")
+            logger.error(f"[ClassSync] 课表文件读取失败: {exc}")
             return None
 
     def _queue_restart(self) -> None:

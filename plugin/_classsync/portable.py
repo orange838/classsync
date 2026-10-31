@@ -162,24 +162,41 @@ def perform_switch_to_portable(plan: SwitchPlan, skip_plugins: bool = False) -> 
 
 
 def switch_back_to_user_dir() -> SwitchPlan:
-    """切回用户目录：删掉 PORTABLE 标记即可，数据不再被读取但保留在原处。"""
+    """切回用户目录：先把便携数据复制回去，再删 PORTABLE 标记。
+
+    必须先复制。因为用户目录里那份还是“当初切到便携版之前”的旧数据，
+    直接删标记会静默回到旧课表，看起来像数据丢了。
+    """
     loc = current_location()
     if not loc.portable:
         return SwitchPlan(True, "当前已经是用户目录模式", loc.install_dir,
                           loc.work_dir, loc.work_dir, False)
+
+    source = loc.work_dir
+    target = user_data_dir()
+    try:
+        _copy_tree(source, target, skip=("cache", "temp"))
+        if not (target / "configs").is_dir():
+            return SwitchPlan(False, "复制回用户目录后校验失败：目标目录缺少 configs",
+                              loc.install_dir, source, target, True)
+    except Exception as exc:  # noqa: BLE001
+        # 没复制成功就不要删标记，否则数据就“找不到了”
+        return SwitchPlan(False, f"复制回用户目录失败：{exc}\n已保留便携模式，未做任何改动。",
+                          loc.install_dir, source, target, True)
+
     marker = loc.install_dir / PORTABLE_MARKER
     try:
         marker.unlink()
     except FileNotFoundError:
         pass
     except Exception as exc:  # noqa: BLE001
-        return SwitchPlan(False, f"删除标记失败：{exc}", loc.install_dir,
-                          loc.work_dir, user_data_dir(), True)
+        return SwitchPlan(False, f"数据已复制回用户目录，但删除 PORTABLE 标记失败：{exc}",
+                          loc.install_dir, source, target, True)
     return SwitchPlan(
         True,
-        f"已切回用户目录模式\n数据目录：{user_data_dir()}\n重启 Class Widgets 后生效。\n"
-        f"原便携数据（{loc.work_dir}）保留未删。",
-        loc.install_dir, loc.work_dir, user_data_dir(), False,
+        f"已切回用户目录模式\n数据目录：{target}\n重启 Class Widgets 后生效。\n"
+        f"原便携数据（{source}）保留未删。",
+        loc.install_dir, source, target, False,
     )
 
 

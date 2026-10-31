@@ -22,6 +22,7 @@ class ClassSyncConfig(ConfigBaseModel):
 
     # 课表落地
     managed_schedule_name: str = "_sync"       # 下发的独立课表名，不碰原课表
+    baseline_schedule_name: str = ""           # 首次接管前用户自己用的课表名（“拉取本机课表”优先读它）
     applied_revision: int = 0
     pending_revision: int = 0                  # 等待课间再切换的版本
     pending_payload: dict = Field(default_factory=dict)

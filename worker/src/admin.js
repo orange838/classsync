@@ -47,7 +47,7 @@ export async function state(env) {
     'SELECT device_id, revision, created_at FROM schedules ORDER BY device_id, revision DESC'
   ).all();
   const { results: commands } = await env.DB.prepare(
-    `SELECT id, device_id, type, status, created_at, finished_at FROM commands
+    `SELECT id, device_id, type, status, created_at, finished_at, result FROM commands
      ORDER BY created_at DESC LIMIT 30`
   ).all();
   const { results: settings } = await env.DB.prepare('SELECT key, value FROM settings').all();

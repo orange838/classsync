@@ -40,7 +40,7 @@ th{color:var(--dim);font-weight:500}
 .mask{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
 .mask.show{display:flex}
 .modal{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:820px;max-height:90vh;overflow:auto}
-.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#262c37;border:1px solid var(--line);padding:10px 18px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:99}
+.toast{position:fixed;left:50%;top:22px;transform:translateX(-50%);background:#262c37;border:1px solid var(--line);padding:10px 18px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:99}
 .toast.show{opacity:1}
 .code{font:600 22px ui-monospace,Consolas,monospace;letter-spacing:3px;color:var(--acc)}
 hr{border:0;border-top:1px solid var(--line);margin:14px 0}
@@ -234,8 +234,10 @@ function render(){
     var h = '<table><tr><th>类型</th><th>设备</th><th>状态</th><th>时间</th></tr>';
     cmds.forEach(function(c){
       var dev = (state.devices.find(function(x){ return x.id === c.device_id; }) || {}).name || c.device_id;
-      h += '<tr><td class="mono">' + c.type + '</td><td>' + dev + '</td><td>' + c.status +
-           '</td><td class="muted">' + relTime(c.created_at) + '</td></tr>';
+      var tip = c.result ? escapeHtml(c.result) : '';
+      h += '<tr><td class="mono">' + c.type + '</td><td>' + dev +
+           '</td><td title="' + tip + '">' + c.status +
+           '</td><td class="muted" title="' + tip + '">' + relTime(c.created_at) + '</td></tr>';
     });
     el('cmdList').innerHTML = h + '</table>';
   }
