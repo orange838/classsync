@@ -192,9 +192,16 @@ function boot(){
     state = j;
     el('login').style.display = 'none';
     el('main').style.display = 'block';
-    el('hdr-actions').innerHTML = '<button id="logoutBtn">退出</button>';
+    el('hdr-actions').innerHTML =
+      '<button id="logoutAllBtn" title="让所有已登录的浏览器立即失效">全部下线</button>' +
+      '<button id="logoutBtn">退出</button>';
     el('logoutBtn').onclick = function(){
       api('/api/admin/logout', {method:'POST'}).then(function(){ location.reload(); });
+    };
+    el('logoutAllBtn').onclick = function(){
+      if(!confirm('让所有已经登录的浏览器立即失效？你当前这个也会被踢下线。')) return;
+      api('/api/admin/logout-all', {method:'POST'}).then(function(){ location.reload(); })
+        .catch(function(e){ toast(e.message); });
     };
     render();
     scheduleAutoRefresh();
@@ -288,6 +295,9 @@ function deviceCard(d){
       '数据目录 <span class="mono">' + escapeHtml(d.data_dir || '—') + '</span>' +
       (d.last_error ? '<br><span style="color:var(--err)">' + escapeHtml(d.last_error) + '</span>' : '') +
     '</div>' +
+    '<hr>' +
+    '<div class="row"><b>已装插件</b><span class="muted">' + ((d.plugins||[]).length) + ' 个</span></div>' +
+    '<div style="margin-top:6px">' + pluginsHtml(d) + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">' +
       '<button data-act="edit">编辑课表</button>' +
       '<button data-act="upload">拉取本机课表</button>' +
@@ -302,11 +312,56 @@ function deviceCard(d){
     }).catch(function(e){ toast(e.message); });
   };
   card.querySelector('[data-act="cmd"]').onclick = function(){ openCmd(d); };
+  card.querySelectorAll('[data-plugin-toggle]').forEach(function(btn){
+    btn.onclick = function(){
+      var pid = btn.getAttribute('data-plugin-toggle');
+      var next = btn.getAttribute('data-plugin-next') === '1';
+      sendCommand(d.id, 'plugin_set_enabled', {id: pid, enabled: next})
+        .then(function(){ toast('已排队：' + (next ? '启用' : '禁用') + ' ' + pid + '，设备下次心跳生效'); })
+        .catch(function(e){ toast(e.message); });
+    };
+  });
+  card.querySelectorAll('[data-plugin-remove]').forEach(function(btn){
+    btn.onclick = function(){
+      var pid = btn.getAttribute('data-plugin-remove');
+      if(!confirm('卸载插件「' + pid + '」？\n\n会移到 plugins\\.backups 里，可恢复，但需要重启才生效。')) return;
+      var typed = prompt('请输入插件 id 以确认：\n' + pid);
+      if(typed !== pid){ if(typed !== null) toast('id 不一致，已取消'); return; }
+      sendCommand(d.id, 'plugin_uninstall', {id: pid})
+        .then(function(){ toast('已排队卸载：' + pid); })
+        .catch(function(e){ toast(e.message); });
+    };
+  });
   card.querySelector('[data-act="del"]').onclick = function(){
     if(!confirm('解绑「' + d.name + '」？该设备的课表记录也会删除。')) return;
     api('/api/admin/device/' + d.id, {method:'DELETE'}).then(refresh).catch(function(e){ toast(e.message); });
   };
   return card;
+}
+
+function pluginsHtml(d){
+  var list = d.plugins || [];
+  if(!list.length) return '<div class="muted">设备还没上报，下次同步后出现</div>';
+  var h = '';
+  list.forEach(function(p){
+    var self = p.id === 'org.cslblog.classsync';
+    var state = p.enabled === true ? '<span class="pill ok">已启用</span>'
+              : p.enabled === false ? '<span class="pill">已禁用</span>'
+              : '<span class="pill">状态未知</span>';
+    var acts = '';
+    if(!p.bundled && !self){
+      acts = '<span style="display:flex;gap:6px;margin-left:auto">' +
+        '<button data-plugin-toggle="' + escapeHtml(p.id) + '" data-plugin-next="' + (p.enabled ? '0' : '1') + '">' +
+          (p.enabled === false ? '启用' : '禁用') + '</button>' +
+        '<button class="danger" data-plugin-remove="' + escapeHtml(p.id) + '">卸载</button></span>';
+    }
+    h += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">' +
+         '<span style="font-size:13px">' + escapeHtml(p.name) + '</span>' +
+         '<span class="muted mono" style="font-size:11px">' + escapeHtml(p.id) + '</span>' +
+         (p.version ? '<span class="muted" style="font-size:11px">v' + escapeHtml(p.version) + '</span>' : '') +
+         state + acts + '</div>';
+  });
+  return h;
 }
 
 function updateCountdowns(){

@@ -28,6 +28,9 @@ export async function listDevices(env) {
 
 /** 只在状态真的变化时更新，省行写入次数 */
 export async function updateDeviceRuntime(env, device, patch) {
+  // 设备本次没上报的字段沿用旧值，避免把已经记下的信息抹掉
+  const pluginsJson = patch.plugins_json ?? device.plugins_json ?? null;
+
   const changed =
     device.status !== patch.status ||
     device.current_title !== patch.current_title ||
@@ -39,6 +42,7 @@ export async function updateDeviceRuntime(env, device, patch) {
     device.plugin_version !== patch.plugin_version ||
     device.data_mode !== patch.data_mode ||
     device.data_dir !== patch.data_dir ||
+    (device.plugins_json || null) !== pluginsJson ||
     (device.last_error || '') !== (patch.last_error || '');
 
   if (!changed) {
@@ -53,7 +57,8 @@ export async function updateDeviceRuntime(env, device, patch) {
 
   await env.DB.prepare(
     `UPDATE devices SET last_seen=?, status=?, current_title=?, period_end=?, next_title=?,
-     app_version=?, plugin_version=?, data_mode=?, data_dir=?, schedule_rev=?, schedule_hash=?, last_error=?
+     app_version=?, plugin_version=?, data_mode=?, data_dir=?, schedule_rev=?, schedule_hash=?,
+     plugins_json=?, last_error=?
      WHERE id=?`
   )
     .bind(
@@ -68,6 +73,7 @@ export async function updateDeviceRuntime(env, device, patch) {
       patch.data_dir ?? null,
       patch.schedule_rev ?? 0,
       patch.schedule_hash ?? null,
+      pluginsJson,
       patch.last_error ?? null,
       device.id
     )

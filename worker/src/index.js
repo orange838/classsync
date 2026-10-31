@@ -1,6 +1,6 @@
 import { pairDevice, syncDevice, unpairDevice } from './device.js';
 import {
-  requireAdmin, login, logout, state, saveDraft, getDraft, publish,
+  requireAdmin, login, logout, logoutAll, state, saveDraft, getDraft, publish,
   makePairingCode, pushCommand, updateSettings, deleteDevice,
 } from './admin.js';
 import { fail } from './util.js';
@@ -43,6 +43,7 @@ export default {
         if (path === '/api/admin/pairing' && method === 'POST') return await makePairingCode(request, env);
         if (path === '/api/admin/command' && method === 'POST') return await pushCommand(request, env);
         if (path === '/api/admin/settings' && method === 'POST') return await updateSettings(request, env);
+        if (path === '/api/admin/logout-all' && method === 'POST') return await logoutAll(env);
 
         const draftMatch = path.match(/^\/api\/admin\/draft\/([^/]+)$/);
         if (draftMatch) {

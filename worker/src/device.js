@@ -84,6 +84,21 @@ export async function syncDevice(request, env) {
   // 设备本次上报的「已应用」课表版本，用它判断是否还需要下发
   const appliedRev = Number(body.schedule_rev ?? 0) || 0;
 
+  // 已装插件清单（只读信息）：限制条数与字段长度，不信任设备输入
+  let pluginsJson = null;
+  if (Array.isArray(body.plugins)) {
+    pluginsJson = JSON.stringify(
+      body.plugins.slice(0, 60).map((p) => ({
+        id: String(p?.id || '').slice(0, 120),
+        name: String(p?.name || '').slice(0, 80),
+        version: String(p?.version || '').slice(0, 40),
+        enabled: Boolean(p?.enabled),
+        bundled: Boolean(p?.bundled),
+        has_ui: Boolean(p?.has_ui),
+      })).filter((p) => p.id)
+    );
+  }
+
   await updateDeviceRuntime(env, device, {
     status: runtime.status ?? null,
     current_title: runtime.title ?? null,
@@ -95,6 +110,7 @@ export async function syncDevice(request, env) {
     plugin_version: cert.plugin_version ?? null,
     data_mode: cert.data_mode ?? null,
     data_dir: cert.data_dir ?? null,
+    plugins_json: pluginsJson,
     last_error: body.last_error ?? null,
   });
 

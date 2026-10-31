@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import socket
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -28,6 +30,7 @@ from _classsync.worker import NetworkWorker
 
 IN_CLASS_STATUS = "class"
 NOTIFY_PROVIDER_ID = "org.cslblog.classsync.notify"
+PLUGIN_ID = "org.cslblog.classsync"
 
 
 class Plugin(CW2Plugin):
@@ -194,6 +197,7 @@ class Plugin(CW2Plugin):
             "schedule_rev": self._config.applied_revision,
             "schedule_hash": self._config.schedule_hash,
             "last_error": self._config.last_error,
+            "plugins": self._plugins_snapshot(),
         }
         if self._config.pending_acks:
             payload["acks"] = self._config.pending_acks
@@ -528,6 +532,20 @@ class Plugin(CW2Plugin):
                     )
                     if ok:
                         self._queue_restart()
+                elif command_type == "plugin_set_enabled":
+                    cmd_payload = command.get("payload") or {}
+                    ok, message = self._set_plugin_enabled(
+                        str(cmd_payload.get("id") or ""), bool(cmd_payload.get("enabled"))
+                    )
+                    acks.append({"id": command_id, "ok": ok, "result": message[:200]})
+                    if ok:
+                        immediate = True
+                elif command_type == "plugin_uninstall":
+                    cmd_payload = command.get("payload") or {}
+                    ok, message = self._uninstall_plugin(str(cmd_payload.get("id") or ""))
+                    acks.append({"id": command_id, "ok": ok, "result": message[:200]})
+                    if ok:
+                        immediate = True
                 elif command_type == "restart_app":
                     acks.append({"id": command_id, "ok": True, "result": "即将重启"})
                     self._queue_restart()
@@ -603,6 +621,142 @@ class Plugin(CW2Plugin):
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[ClassSync] 课表文件读取失败: {exc}")
             return None
+
+    # ------------------------------------------------------------ 插件清单
+    def _plugins_dir(self) -> Path:
+        return portable.current_location().work_dir / "plugins"
+
+    def _enabled_container(self):
+        """返回可写的“启用列表”容器，外加当前列表。失败返回 (None, None)。
+
+        CW2 的全局配置有两套访问方式（pydantic 属性 / .data 字典），
+        不确定哪套可写，就按能用的那套走。
+        """
+        try:
+            mgr = self.api.globalconfig.configs
+        except Exception:
+            return None, None
+        try:
+            plugins_obj = mgr.plugins
+            return plugins_obj, list(plugins_obj.enabled or [])
+        except Exception:
+            pass
+        try:
+            data = mgr.data
+            plugins_dict = data.setdefault("plugins", {})
+            return plugins_dict, list(plugins_dict.get("enabled") or [])
+        except Exception:
+            return None, None
+
+    def _save_global_config(self) -> None:
+        self.api.globalconfig.configs.save()
+
+    def _plugins_snapshot(self) -> list[dict]:
+        """扫描已装插件清单（只读信息，不执行任何插件代码）。"""
+        try:
+            root = self._plugins_dir()
+            if not root.is_dir():
+                return []
+
+            container, enabled_list = self._enabled_container()
+            enabled_known = enabled_list is not None
+            enabled = set(str(x) for x in (enabled_list or []))
+
+            items: list[dict] = []
+            for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                manifest = entry / "cwplugin.json"
+                meta: dict = {}
+                if manifest.is_file():
+                    try:
+                        loaded = json.loads(manifest.read_text(encoding="utf-8"))
+                        meta = loaded if isinstance(loaded, dict) else {}
+                    except Exception:  # noqa: BLE001
+                        meta = {}
+                pid = str(meta.get("id") or entry.name)
+                items.append({
+                    "id": pid,
+                    "name": str(meta.get("name") or pid)[:80],
+                    "version": str(meta.get("version") or "")[:40],
+                    "enabled": (pid in enabled) if enabled_known else None,
+                    "bundled": pid.startswith("builtin."),
+                    "has_ui": bool(meta.get("custom_plugin_page") or meta.get("ui")),
+                })
+                if len(items) >= 60:
+                    break
+            return items
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[ClassSync] 读取插件清单失败: {exc}")
+            return []
+
+    def _set_plugin_enabled(self, plugin_id: str, enabled: bool) -> tuple[bool, str]:
+        if not plugin_id:
+            return False, "缺少插件 id"
+        if plugin_id.startswith("builtin."):
+            return False, "内置插件不允许操作"
+        container, current = self._enabled_container()
+        if container is None or current is None:
+            return False, "读取全局配置失败"
+
+        names = set(str(x) for x in current)
+        if enabled:
+            names.add(plugin_id)
+        else:
+            names.discard(plugin_id)
+        new_list = sorted(names)
+
+        try:
+            if isinstance(container, dict):
+                container["enabled"] = new_list
+            else:
+                container.enabled = new_list
+            self._save_global_config()
+        except Exception as exc:  # noqa: BLE001
+            return False, f"写入配置失败：{exc}"
+
+        return True, (
+            f"已启用 {plugin_id}" if enabled else f"已禁用 {plugin_id}"
+        ) + "，重启后生效"
+
+    def _uninstall_plugin(self, plugin_id: str) -> tuple[bool, str]:
+        if not plugin_id:
+            return False, "缺少插件 id"
+        if plugin_id.startswith("builtin."):
+            return False, "内置插件不允许卸载"
+        if plugin_id == PLUGIN_ID:
+            return False, "不能远程卸载本插件，请在本机手动处理"
+
+        root = self._plugins_dir()
+        target = root / plugin_id
+        if not target.is_dir():
+            # 目录名可能不等于 id，按清单逐个找
+            for entry in root.iterdir():
+                manifest = entry / "cwplugin.json"
+                if manifest.is_file():
+                    try:
+                        if str(json.loads(manifest.read_text(encoding="utf-8")).get("id")) == plugin_id:
+                            target = entry
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+        if not target.is_dir():
+            return False, f"找不到插件目录：{plugin_id}"
+
+        # 先移出启用列表，再搬到 .backups（可恢复，不真删）
+        ok_enable, msg_enable = self._set_plugin_enabled(plugin_id, False)
+
+        backup_root = root / ".backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dest = backup_root / f"{target.name}-{stamp}"
+        try:
+            shutil.move(str(target), str(dest))
+        except Exception as exc:  # noqa: BLE001
+            return False, f"移动到备份目录失败：{exc}"
+
+        note = "" if ok_enable else f"（{msg_enable}）"
+        return True, f"已卸载 {plugin_id}，备份在 plugins\\.backups\\\\{dest.name}{note}，重启后生效"
 
     def _queue_restart(self) -> None:
         QTimer.singleShot(1500, self.api.application.restart)
