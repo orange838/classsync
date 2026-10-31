@@ -66,7 +66,12 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
   <div class="card">
     <div class="row">
       <div><b>配对</b> <span class="muted">生成一次性配对码，在插件里填</span></div>
-      <button id="pairBtn">生成配对码</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="muted">有效期</span>
+        <input id="pairMinutes" style="max-width:90px" value="30" />
+        <span class="muted">分钟</span>
+        <button id="pairBtn">生成配对码</button>
+      </div>
     </div>
     <div id="pairOut" class="muted" style="margin-top:10px"></div>
   </div>
@@ -217,6 +222,10 @@ function render(){
   if(document.activeElement !== el('pollInput')){
     el('pollInput').value = state.settings.poll_interval || '30';
   }
+  if(state.online_grace_seconds && el('pollHint')){
+    el('pollHint').textContent = '建议 60–300；最小 15 秒。超过 ' +
+      state.online_grace_seconds + ' 秒没心跳算离线（自动跟随间隔×2）';
+  }
 
   var cmds = state.commands || [];
   if(!cmds.length){
@@ -246,9 +255,10 @@ function deviceCard(d){
   var revPill = (d.latest_revision > (d.schedule_rev||0))
     ? '<span class="pill warn">待应用 v' + d.latest_revision + '</span>'
     : '<span class="pill ok">课表已最新</span>';
-  var modePill = d.data_mode === 'portable'
-    ? '<span class="pill">便携版</span>'
-    : '<span class="pill">用户目录</span>';
+  var isPortable = d.data_mode === 'portable';
+  var modePill = isPortable
+    ? '<span class="pill ok">便携版 · 程序目录</span>'
+    : '<span class="pill">用户目录 · C 盘</span>';
 
   card.innerHTML =
     '<div class="row">' +
@@ -257,7 +267,8 @@ function deviceCard(d){
     '</div>' +
     '<div class="muted" style="margin-top:4px">' +
       '<span class="dot ' + (d.online?'on':'off') + '"></span>' +
-      '最后心跳 ' + relTime(d.last_seen) +
+      '<span title="' + escapeHtml(d.last_seen ? new Date(d.last_seen).toLocaleString() : '从未上报') + '">' +
+      (d.online ? '在线' : '离线') + ' · 最后心跳 ' + relTime(d.last_seen) + '</span>'
     '</div>' +
     '<hr>' +
     '<div class="row">' +
@@ -433,6 +444,14 @@ el('btnPublish').onclick = function(){
 
 function openCmd(d){
   currentDevice = d;
+  // 根据设备当前的数据位置，把「切换」说清楚到底切到哪边，
+  // 否则已经是便携版的设备也显示「切换便携模式」，容易误判成非便携版
+  var opt = el('cmdType').querySelector('option[value="switch_portable"]');
+  if(opt){
+    opt.textContent = (d && d.data_mode === 'portable')
+      ? '切换到用户目录（搬到 C 盘）'
+      : '切换到便携版（搬到程序目录）';
+  }
   el('cmdMask').classList.add('show');
   updateHint();
 }
@@ -443,7 +462,9 @@ function updateHint(){
   var hints = {
     sync_now: '请设备尽快发一次同步请求。设备平时在睡觉，要等它下一次心跳才会收到 —— 最长等一个轮询间隔。',
     upload_schedule: '让设备把当前课表传到后台草稿区，之后可以在这里改。',
-    switch_portable: '在便携版和用户目录之间切换数据位置，然后重启程序。',
+    switch_portable: (currentDevice && currentDevice.data_mode === 'portable')
+      ? '当前是便携版（数据在程序目录）。切换会把数据复制到用户目录 %LOCALAPPDATA%\\Class_Widgets_2，然后重启程序；原数据不会被删除。'
+      : '当前是用户目录（数据在 C 盘）。切换会把数据复制到程序目录下的 data\\，然后重启程序；原数据不会被删除。',
     restart_app: '直接重启 Class Widgets 2。'
   };
   el('cmdHint').textContent = hints[t] || '';
@@ -460,10 +481,22 @@ el('cmdSend').onclick = function(){
     .catch(function(e){ toast(e.message); });
 };
 
+// 记住上次填的有效期，下次生成时直接用
+(function(){
+  try{
+    var saved = localStorage.getItem('cs_pair_minutes');
+    if(saved) el('pairMinutes').value = saved;
+  }catch(e){}
+})();
+
 el('pairBtn').onclick = function(){
-  api('/api/admin/pairing', {method:'POST', body: JSON.stringify({minutes:30})}).then(function(j){
+  var minutes = Math.min(Math.max(Math.round(Number(el('pairMinutes').value) || 30), 1), 1440);
+  el('pairMinutes').value = minutes;
+  try{ localStorage.setItem('cs_pair_minutes', String(minutes)); }catch(e){}
+  api('/api/admin/pairing', {method:'POST', body: JSON.stringify({minutes: minutes})}).then(function(j){
     el('pairOut').innerHTML = '配对码：<span class="code">' + j.code + '</span>' +
-      '<div style="margin-top:6px">30 分钟内有效，只能用一次。</div>';
+      '<div style="margin-top:6px">' + minutes + ' 分钟内有效，只能用一次。' +
+      '到期时间 ' + new Date(j.expires_at).toLocaleString() + '</div>';
   }).catch(function(e){ toast(e.message); });
 };
 el('savePoll').onclick = function(){

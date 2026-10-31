@@ -58,6 +58,13 @@ export async function state(env) {
     if (!latestMap[s.device_id]) latestMap[s.device_id] = { revision: s.revision, created_at: s.created_at };
   }
 
+  const settingMap = Object.fromEntries((settings || []).map((s) => [s.key, s.value]));
+  const pollInterval = Math.min(Math.max(Number(settingMap.poll_interval || 30) || 30, 15), 86400);
+  // 在线判定给 2 个轮询间隔的宽限，且不低于 90 秒；
+  // 否则轮询间隔调大后设备会被误判成离线
+  const graceSeconds = Math.max(90, pollInterval * 2);
+  const graceMs = graceSeconds * 1000;
+
   return ok({
     devices: (devices || []).map((d) => ({
       ...d,
@@ -65,10 +72,11 @@ export async function state(env) {
       draft_updated_at: draftMap[d.id] || null,
       latest_revision: latestMap[d.id]?.revision || 0,
       latest_published_at: latestMap[d.id]?.created_at || null,
-      online: d.last_seen ? Date.now() - Date.parse(d.last_seen) < 5 * 60 * 1000 : false,
+      online: d.last_seen ? Date.now() - Date.parse(d.last_seen) < graceMs : false,
     })),
     commands: commands || [],
-    settings: Object.fromEntries((settings || []).map((s) => [s.key, s.value])),
+    settings: settingMap,
+    online_grace_seconds: graceSeconds,
   });
 }
 

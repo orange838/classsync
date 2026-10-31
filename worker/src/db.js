@@ -42,9 +42,9 @@ export async function updateDeviceRuntime(env, device, patch) {
     (device.last_error || '') !== (patch.last_error || '');
 
   if (!changed) {
-    // 只刷新心跳，用于在线判断；上行只在 last_seen 每 5 分钟才写一次
-    const lastMs = device.last_seen ? Date.parse(device.last_seen) : 0;
-    if (Date.now() - lastMs < 5 * 60 * 1000) return false;
+    // 每次同步都刷新心跳。以前为省写入做了 5 分钟节流，结果“最后心跳”最多
+    // 滱后 5 分钟，而在线判定也是 5 分钟，设备明明在干活却显示离线。
+    // 代价：2 台设备 30 秒间隔约 5,760 行写/天，占 D1 免费额度 5.8%。
     await env.DB.prepare('UPDATE devices SET last_seen = ? WHERE id = ?')
       .bind(new Date().toISOString(), device.id)
       .run();
