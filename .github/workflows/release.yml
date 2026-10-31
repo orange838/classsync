@@ -69,6 +69,10 @@ jobs:
       - name: 打包 .cwplugin 与 .zip
         working-directory: ${{ env.PLUGIN_DIR }}
         run: |
+          # 根目录的 README.md / icon.png 是插件广场抓取的资源，
+          # 这里覆盖进插件包，保证包内与广场展示一致
+          cp -f ../README.md ./README.md
+          cp -f ../icon.png ./icon.png
           # 开发用的端到端测试脚本不随包发布
           rm -f test_client.py
           rm -rf __pycache__ _classsync/__pycache__

@@ -1,150 +1,95 @@
-# ClassSync
+# 课表同步 ClassSync
 
-Class Widgets 2 的**课表同步**方案：一个跑在 Cloudflare Workers + D1 上的轻量服务端，
-加上一个 CW2 插件作为被控端。用于把课表从自建服务器手动下发到多台机器，
-并实时查看各机器状态。
+**课表同步** 是一个面向 **Class Widgets 2** 的课表远程下发插件。你在浏览器后台编辑一次课表，
+手边的机器各自拉到自己本地，不用挨个跑过去改。
 
-> 与插件广场上的「集控」插件不同：ClassSync 不依赖其内网/公网连接方案，
-> 是独立实现，绑定界面参考了集控的排版风格。
+它使用 [Class Widgets 2 SDK](https://github.com/Class-Widgets/class-widgets-sdk) 编写，
+后端是一套自建的 Cloudflare Worker + D1（源码在同仓库 `worker/` 目录）。
 
-## 目录结构
+## 功能
+
+- **手动发布才生效**：后台改完必须点「发布」，设备才在下次同步时拿到新版本；只存草稿不会下发。
+- **避开上课时间**：设备收到新课表时若正在上课，会先挂起，等到下一个课间再自动切换，不会在课堂中途跳变。
+- **不碰原课表**：下发内容写入独立的 `_sync` 课表，原来的 `school.json` 一个字节都不动，随时能手动切回。
+- **多机各自独立**：每台设备绑定自己的课表，互不干扰；在线状态、课表版本分开展示。
+- **便携版一键切换**：把数据目录从 `%LOCALAPPDATA%\Class_Widgets_2` 搬到程序目录 `data\`。
+  配合冰点还原的机房，只要程序装在 D 盘，数据就不会被还原。
+- **实时状态**：设备上报「当前课程 + 结束时刻」，后台用本地时钟倒计时，看起来是实时的，不依赖轮询频率。
+- **后台可视化**：设备在线状态、当前课程、课表版本对比、待应用标记、配对码都在一个页面里，15 秒自动刷新。
+- **课表可直接导入**：后台能直接读你电脑上现成的 `school.json`，不用手抄 JSON。
+- **零第三方依赖**：网络请求用 Python 标准库 `urllib`，不需要安装 `requests`、`aiohttp`。
+
+## 安装
+
+### 从插件广场安装
+
+在 **Class Widgets 2 → 设置 → 插件** 里搜索「课表同步」直接安装。
+
+### 手动安装
+
+把插件目录放到数据目录下的 `plugins\org.cslblog.classsync\`：
+
+- 便携版：`<安装目录>\data\plugins\`
+- 普通安装：`%LOCALAPPDATA%\Class_Widgets_2\plugins\`
+
+然后在 **设置 → 插件** 里启用「课表同步」。
+
+## 使用
+
+1. 打开你的后台地址，用管理密钥登录。
+2. 点「生成配对码」，得到一个一次性配对码。
+3. 在插件设置页填入服务器地址、设备名称、配对码，点「绑定」。
+4. 绑定成功后插件自动同步，之后按后台设定的间隔轮询（默认 30 秒）。
+5. 后台「编辑课表」→ 点「导入本地文件」选现成的 `school.json`（或直接粘贴 JSON）
+   →「保存草稿」→「发布到设备」。
+6. 设备下次同步拿到新版本；如果当时正在上课，会等课间再切换。
+
+后台地址不固定，取决于你自己部署的 Worker 域名。
+
+## 工作原理
 
 ```
-classsync/
-├── .github/workflows/
-│   └── release.yml          打 tag 自动打包发布插件
-├── worker/                  Cloudflare Workers 服务端（JS，零构建依赖）
-│   ├── src/
-│   │   ├── index.js         原生路由
-│   │   ├── admin.js         后台接口（登录/草稿/发布/指令/设置）
-│   │   ├── adminHtml.js     单页深色后台
-│   │   ├── device.js         设备端接口（配对/同步/解绑）
-│   │   ├── db.js            D1 读写封装
-│   │   └── util.js          工具函数
-│   ├── migrations/
-│   │   └── 0001_init.sql    建表脚本
-│   └── wrangler.toml
-└── plugin/                  CW2 插件（Python，仅标准库 + PySide6）
-    ├── main.py              插件主体
-    ├── cwplugin.json        插件元数据
-    ├── _classsync/          内部模块（独立包，避免污染 sys.path）
-    ├── qml/SyncSettings.qml 设置页
-    └── icon.png
-```
-
-## 工作方式
-
-```
-┌─────────────┐   手动发布课表 / 下发指令   ┌──────────────────┐
-│  浏览器后台  │ ─────────────────────────► │                  │
-└─────────────┘                            │  Cloudflare      │
-                                           │  Worker + D1     │
-┌─────────────┐   轮询拉取 + 上报状态       │                  │
-│  CW2 插件   │ ◄────────────────────────► │                  │
-│ (家里/班级) │                            └──────────────────┘
+┌─────────────┐  手动发布课表 / 下发指令   ┌──────────────────┐
+│  浏览器后台  │ ────────────────────────► │                  │
+└─────────────┘                           │  Cloudflare      │
+                                          │  Worker + D1     │
+┌─────────────┐  轮询拉取 + 上报状态       │                  │
+│  CW2 插件   │ ◄───────────────────────► │                  │
+│ (家里/班级) │                           └──────────────────┘
 └─────────────┘
 ```
 
-- **机器只拉不推**：设备端定时轮询（默认 120 秒），上报运行状态并申领新课表。
+- **机器只拉不推**：设备端定时轮询，上报运行状态并申领新课表。
 - **发布才生效**：后台改动先存草稿，手动点「发布」才产生新版本。
 - **避开上课**：下发时若正在上课，先把课表挂起，等下一个课间再切换。
-- **落地为独立课表**：写到 `_sync` 这份课表里，**不动** 用户原本的课表文件。
-- **便携版切换**：冰点还原机器可一键把数据目录切到安装盘（D 盘）。
+- **落地为独立课表**：写进 `_sync`，**不动**用户原本的课表文件。
 
-## 部署
+## 常见问题
 
-### 1. 服务端
+**改了课表但设备没变？**
+后台必须点「发布」。只点「保存草稿」不会下发。
 
-```bash
-cd worker
-npm install
+**发布之后设备没反应？**
+设备在等下一次轮询（默认 30 秒）。后台的「请求同步」只是排队一条指令，
+设备同样要等到下一次心跳才收到，不会立刻唤醒。
 
-# 创建 D1 数据库，把返回的 database_id 填进 wrangler.toml
-npx wrangler d1 create classsync
+**冰点还原的机器怎么办？**
+先把 Class Widgets 2 装到 D 盘，再在插件设置页点「切换到便携版」，然后重启。
+不要在 C 盘切完等重启——会被还原掉。切换只会复制数据，原用户目录不会被删除。
 
-# 建表（远程）
-npx wrangler d1 execute classsync --remote --file=./migrations/0001_init.sql
+**会覆盖我原来的课表吗？**
+不会。下发内容写进独立的 `_sync` 课表，原 `school.json` 不动。
 
-# 设置后台管理密钥
-npx wrangler secret put ADMIN_KEY
+**怎么判断现在是不是便携版？**
+插件设置页的「数据目录」卡片上会直接写明是「便携版（数据在程序目录）」
+还是「用户目录（数据在 C 盘）」，并显示完整路径。后台的设备卡片里也会带同样的标记。
 
-# 部署
-npx wrangler deploy
-```
+## 服务端
 
-> `*.workers.dev` 在部分网络下会被 DNS 污染，建议在
-> Cloudflare 控制台的 **Workers → 设置 → 域和路由 → 自定义域** 里
-> 绑定一个**子域名**（例如 `classsync.example.com`），不要占用顶级域名。
+服务端是同仓库 `worker/` 目录下的 Cloudflare Worker + D1，推 `main` 即自动部署。
+自建步骤、自动部署与自动发版的说明见 [docs/deploy.md](docs/deploy.md)。
 
-### 2. 插件
+## 依赖
 
-把 `plugin/` 下的全部文件复制到 CW2 的插件目录：
-
-- 普通安装：`%LOCALAPPDATA%\Class_Widgets_2\plugins\org.cslblog.classsync\`
-- 便携版：`<CW2 安装目录>\data\plugins\org.cslblog.classsync\`
-
-然后在 CW2 的 **设置 → 插件** 里启用「课表同步」。
-
-### 3. 配对
-
-1. 打开后台，用 `ADMIN_KEY` 登录
-2. 点「生成配对码」，拿到 6 位码
-3. 在插件设置页填入服务器地址、设备名称、配对码，点「绑定」
-
-## 自动部署服务端
-
-仓库已在 Cloudflare 控制台绑定 Git 集成（Workers → classsync → 设置 → 构建）：
-
-- 仓库 `orange838/classsync`，生产分支 `main`
-- 根目录填 `worker`，部署命令用默认的 `npx wrangler deploy`
-- 构建命令留空（服务端是零构建的原生 JS）
-
-所以**只要推送到 `main`，Cloudflare 就会自动构建并上线 Worker**，
-不用本地跑 `wrangler deploy`。构建失败时线上会保持上一个可用版本。
-
-> 注意：CF 的 Git 集成只监听分支推送，**打 tag 不会触发 Worker 部署**；
-> tag 触发的是下面「自动发布插件」里的插件打包流程。
-
-## 自动发布插件
-
-仓库已配置好 GitHub Actions，打标签即可自动打包并发布到
-[Class Widgets 插件广场](https://plaza.cw.rinlit.cn/)。
-
-### 一次性准备
-
-1. 在 [插件广场控制台](https://plaza.cw.rinlit.cn/console) 注册插件 ID
-   `org.cslblog.classsync`，并创建发布令牌
-2. 在 GitHub 仓库 **Settings → Secrets and variables → Actions** 里
-   新建名为 `CWPT_TOKEN` 的 Secret，填入令牌
-
-### 发一个版本
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-标签必须是 `v主版本.次版本.修订号`（只支持数字，如 `v0.1.0`）。
-
-工作流会依次：
-
-1. 校验标签格式，把版本号同步进 `plugin/cwplugin.json`
-2. 用 `cw-plugin-pack` 生成 `org.cslblog.classsync.cwplugin` 与 `.zip`
-3. 解包校验产物里的清单、入口文件和版本号
-4. 用 `cw-plugin-publish` 发布到插件广场（没配 `CWPT_TOKEN` 则跳过，只出 Release）
-5. 创建 GitHub Release 并挂上两个包
-
-也可以在 Actions 页面手动触发 `Release Plugin`，输入标签名发布。
-
-## 后台功能
-
-- 设备列表：在线状态、当前课程、剩余时间倒计时、课表版本对比、便携版标记
-- 课表编辑：JSON 编辑器 → 保存草稿 → 发布
-- 指令下发：立即同步 / 上传本机课表 / 切换便携版 / 重启应用
-- 设置：轮询间隔（60–600 秒）
-
-## 安全
-
-- 后台登录：`ADMIN_KEY` 换取的 Cookie（`sha256("classsync:" + ADMIN_KEY)`）
-- 设备鉴权：配对时下发的一次性 `device_token`
-- 密钥一律通过 `wrangler secret put` 设置，**不写进仓库**
+只用到 Class Widgets 2 运行时自带的东西（PySide6、pydantic、loguru、certifi），
+HTTP 用标准库 `urllib`，**不需要额外安装任何包**。
