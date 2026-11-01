@@ -275,17 +275,16 @@ function render(){
   }
 
   if(ticker) clearInterval(ticker);
-  ticker = setInterval(updateCountdowns, 1000);
-  updateCountdowns();
+  ticker = setInterval(tickLive, 1000);
+  tickLive();
 }
 
 function deviceCard(d){
   var card = document.createElement('div');
   card.className = 'card';
 
-  var onlinePill = d.online
-    ? '<span class="pill ok">在线</span>'
-    : '<span class="pill">离线</span>';
+  var onlinePill = '<span class="pill' + (d.online ? ' ok' : '') + '" data-online-pill="1">' +
+    (d.online ? '在线' : '离线') + '</span>';
   var revPill = (d.latest_revision > (d.schedule_rev||0))
     ? '<span class="pill warn">待应用 v' + d.latest_revision + '</span>'
     : '<span class="pill ok">课表已最新</span>';
@@ -299,9 +298,10 @@ function deviceCard(d){
       '<div style="font-weight:600;font-size:15px">' + escapeHtml(d.name) + '</div>' +
       onlinePill +
     '</div>' +
-    '<div class="muted" style="margin-top:4px">' +
+    '<div class="muted" style="margin-top:4px" title="' +
+      escapeHtml(d.last_seen ? new Date(d.last_seen).toLocaleString() : '从未上报') + '">' +
       '<span class="dot ' + (d.online?'on':'off') + '"></span>' +
-      '<span title="' + escapeHtml(d.last_seen ? new Date(d.last_seen).toLocaleString() : '从未上报') + '">' +
+      '<span class="hb-text">' +
       (d.online ? '在线' : '离线') + ' · 最后心跳 ' + relTime(d.last_seen) + '</span>' +
     '</div>' +
     '<hr>' +
@@ -333,6 +333,10 @@ function deviceCard(d){
       '<button data-act="cmd">下发指令</button>' +
       '<button class="danger" data-act="del">解绑</button>' +
     '</div>';
+
+  // 心跳每秒走一次，这两个属性给 updateHeartbeats() 用
+  card.setAttribute('data-seen', d.last_seen || '');
+  card.setAttribute('data-online', d.online ? '1' : '0');
 
   card.querySelector('[data-act="edit"]').onclick = function(){ openSchedule(d); };
   card.querySelector('[data-act="upload"]').onclick = function(){
@@ -448,6 +452,37 @@ function updateCountdowns(){
   document.querySelectorAll('[data-end]').forEach(function(node){
     var v = node.getAttribute('data-end');
     if(v) node.textContent = fmtCountdown(v);
+  });
+}
+
+// 每秒跑一次：倒计时 + 心跳
+function tickLive(){
+  updateCountdowns();
+  updateHeartbeats();
+}
+
+// 心跳的秒数每秒重算，不必等 15 秒一次的全量刷新。
+// 超过在线宽限期就自己翻成离线，避免出现「在线 · 最后心跳 6 分钟前」这种自相矛盾的展示。
+// 宽限期用服务端下发的 online_grace_seconds，两边判定口径一致。
+function updateHeartbeats(){
+  var grace = (state && state.online_grace_seconds) || 120;
+  document.querySelectorAll('[data-seen]').forEach(function(card){
+    var seen = card.getAttribute('data-seen');
+    var online = card.getAttribute('data-online') === '1';
+    if(seen){
+      if((Date.now() - Date.parse(seen)) / 1000 > grace) online = false;
+    } else {
+      online = false;
+    }
+    var pill = card.querySelector('[data-online-pill]');
+    if(pill){
+      pill.className = 'pill' + (online ? ' ok' : '');
+      pill.textContent = online ? '在线' : '离线';
+    }
+    var dot = card.querySelector('.dot');
+    if(dot) dot.className = 'dot ' + (online ? 'on' : 'off');
+    var txt = card.querySelector('.hb-text');
+    if(txt) txt.textContent = (online ? '在线' : '离线') + ' · 最后心跳 ' + relTime(seen);
   });
 }
 

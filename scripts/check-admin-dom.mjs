@@ -120,6 +120,22 @@ check('卡片含插件列表', /课表同步/.test(devices.textContent));
 check('卡片含便携版标识', /便携版/.test(devices.textContent));
 check('卡片含待安装提示位', !/待本机确认安装/.test(devices.textContent), '不该出现空提示');
 
+console.log('心跳实时刷新：');
+check('心跳带具体秒数', /最后心跳 \d+ 秒前/.test(devices.textContent),
+  '实际：' + devices.textContent.replace(/\s+/g, ' ').slice(0, 80));
+
+// 把心跳时间改成 200 秒前，等 ticker 跑一拍，应该自己变成离线
+const card = devices.querySelector('.card');
+card.setAttribute('data-seen', new Date(Date.now() - 200000).toISOString());
+await wait(1200);
+check('超过宽限期自动转离线', /离线 · 最后心跳/.test(card.textContent),
+  '实际：' + card.textContent.replace(/\s+/g, ' ').slice(0, 80));
+const pill = card.querySelector('[data-online-pill]');
+check('顶部药丸同步变离线', pill && pill.textContent === '离线',
+  '实际：' + (pill && pill.textContent));
+const dot = card.querySelector('.dot');
+check('状态点同步变灰', dot && dot.className === 'dot off', '实际：' + (dot && dot.className));
+
 const pkgList = doc.getElementById('pkgList');
 console.log('插件包列表：');
 check('渲染出插件包行', /demo\.zip/.test(pkgList.textContent));
