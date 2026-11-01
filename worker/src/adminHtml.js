@@ -93,7 +93,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
       <input id="plazaQ" placeholder="搜索插件名或 id，留空看最近更新" style="flex:1;min-width:180px" />
       <button id="plazaSearch">搜索</button>
-      <span class="muted">包上限 700 KB</span>
+      <span class="muted">包上限 20 MB</span>
     </div>
     <div id="plazaList" style="margin-top:12px"><div class="muted">点搜索加载广场列表</div></div>
   </div>
@@ -105,7 +105,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
       <input type="file" id="pkgFile" accept=".cwplugin,.zip" />
       <button id="pkgUpload">上传</button>
-      <span class="muted" id="pkgHint">上限约 1.5 MB。上传后会显示 sha256，设备下载时会校验</span>
+      <span class="muted" id="pkgHint">上限 20 MB。上传后会显示 sha256，设备下载时会校验</span>
     </div>
     <div id="pkgList" style="margin-top:12px"></div>
   </div>

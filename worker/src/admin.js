@@ -3,6 +3,7 @@
 import { randomId, randomCode, sha256, nowIso, ok, fail, readCookie, setCookie, clearCookie } from './util.js';
 import { getSetting, setSetting } from './db.js';
 import { readPluginManifest } from './zip.js';
+import { putPackageContent, dropPackageContent, MAX_PACKAGE_BYTES } from './packages.js';
 
 const COOKIE = 'cs_admin';
 
@@ -22,8 +23,8 @@ export const ALLOWED_COMMANDS = new Set([
   'plugin_stage',
 ]);
 
-/** 单包上限：base64 后约 2MB，对应原始包约 1.5MB */
-const MAX_PACKAGE_B64 = 2 * 1024 * 1024;
+/** 单包上限：包体已改为分块存，不再受 D1 单行限制 */
+const MAX_PACKAGE_B64 = Math.ceil((MAX_PACKAGE_BYTES * 4) / 3) + 1024;
 
 /** 常量时间字符串比较，避免按字节提前返回泄露信息 */
 function timingSafeEqual(a, b) {
@@ -166,10 +167,11 @@ export async function uploadPackage(request, env) {
 
   await env.DB.prepare(
     `INSERT INTO packages(id, filename, sha256, size, content, created_at, plugin_id, plugin_version, source)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES(?, ?, ?, ?, NULL, ?, ?, ?, ?)`
   )
-    .bind(id, filename, sha256, bytes.length, content, nowIso(), pluginId, pluginVersion, 'upload')
+    .bind(id, filename, sha256, bytes.length, nowIso(), pluginId, pluginVersion, 'upload')
     .run();
+  await putPackageContent(env, id, bytes);
 
   return ok({ id, filename, sha256, size: bytes.length, plugin_id: pluginId, plugin_version: pluginVersion });
 }
@@ -184,6 +186,7 @@ export async function listPackages(env) {
 
 export async function deletePackage(env, id) {
   if (!id) return fail('缺少包 id');
+  await dropPackageContent(env, id);
   await env.DB.prepare('DELETE FROM packages WHERE id = ?').bind(id).run();
   return ok({ deleted: id });
 }

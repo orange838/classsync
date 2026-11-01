@@ -2,6 +2,7 @@
 
 import { randomId, randomCode, sha256, nowIso, json, fail, ok } from './util.js';
 import { getDeviceByToken, updateDeviceRuntime, latestSchedule, getSetting } from './db.js';
+import { getPackageContent } from './packages.js';
 
 async function requireDevice(request, env) {
   const header = request.headers.get('authorization') || '';
@@ -18,19 +19,18 @@ export async function downloadPackage(request, env, packageId) {
   if (auth.error) return auth.error;
   if (!packageId) return fail('缺少包 id');
 
-  const row = await env.DB.prepare('SELECT filename, sha256, content FROM packages WHERE id = ?')
+  const row = await env.DB.prepare('SELECT filename, sha256 FROM packages WHERE id = ?')
     .bind(packageId)
     .first();
   if (!row) return fail('包不存在或已被删除', 404);
 
   let bytes;
   try {
-    const bin = atob(row.content);
-    bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    bytes = await getPackageContent(env, packageId);
   } catch {
     return fail('包内容已损坏', 500);
   }
+  if (!bytes) return fail('包内容已损坏', 500);
 
   return new Response(bytes, {
     status: 200,

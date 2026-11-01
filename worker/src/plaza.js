@@ -13,12 +13,13 @@
 //   GET /api/plugins/{id}/resources/release?format=cwplugin   包本体
 
 import { randomId, sha256, nowIso, ok, fail } from './util.js';
+import { putPackageContent, MAX_PACKAGE_BYTES } from './packages.js';
 
 const PLAZA_BASE = 'https://plaza.cw.rinlit.cn';
 
-// D1 单行有大小限制，base64 存进去还要膨胀 4/3。
-// 留足余量：700KB 原始包 → 约 933KB base64。
-const MAX_IMPORT_BYTES = 700 * 1024;
+// 包体已改为分块存储（见 packages.js），不再受 D1 单行上限限制，
+// 上限只用来防止把免费额度吃满。
+const MAX_IMPORT_BYTES = MAX_PACKAGE_BYTES;
 
 async function plazaFetch(path, { timeoutMs = 15000 } = {}) {
   const controller = new AbortController();
@@ -138,13 +139,6 @@ export async function importFromPlaza(request, env) {
     );
   }
 
-  let b64 = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < buf.length; i += CHUNK) {
-    b64 += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
-  }
-  b64 = btoa(b64);
-
   const digest = await crypto.subtle.digest('SHA-256', buf);
   const sha = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
   const pkgId = `pkg_${randomId('').slice(0, 10)}`;
@@ -153,10 +147,11 @@ export async function importFromPlaza(request, env) {
 
   await env.DB.prepare(
     `INSERT INTO packages(id, filename, sha256, size, content, created_at, plugin_id, plugin_version, source)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES(?, ?, ?, ?, NULL, ?, ?, ?, ?)`
   )
-    .bind(pkgId, filename, sha, buf.length, b64, nowIso(), id, version, 'plaza')
+    .bind(pkgId, filename, sha, buf.length, nowIso(), id, version, 'plaza')
     .run();
+  await putPackageContent(env, pkgId, buf);
 
   return ok({
     package: {
