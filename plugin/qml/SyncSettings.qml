@@ -185,34 +185,67 @@ PluginPage {
             }
         }
 
-        // ---------------------------------------------------------- 待安装插件（后台只能把包搬过来，生效必须在本机点）
+        // ---------------------------------------------------------- 远程安装（后台只能把包搬过来，生效必须在本机点这里同意）
         Text {
-            visible: pendingInstall.length > 0
-            text: qsTr("待安装插件")
+            text: qsTr("远程安装")
             typography: Typography.BodyStrong
         }
 
         SettingCard {
             Layout.fillWidth: true
-            visible: pendingInstall.length > 0
-            icon.name: "ic_fluent_arrow_download_20_regular"
-            title: qsTr("已下载待安装：") + pendingInstall
-            description: qsTr("后台已经下载并校验过这个包，但不会自己生效。点下面的按钮才会真正装进插件目录；装完需要重启。")
+            icon.name: pendingInstall.length > 0
+                ? "ic_fluent_arrow_download_20_regular"
+                : "ic_fluent_shield_checkmark_20_regular"
+            title: pendingInstall.length > 0
+                ? qsTr("已下载待安装：") + pendingInstall
+                : qsTr("没有待安装的插件")
+            description: pendingInstall.length > 0
+                ? qsTr("后台已下载并校验过这个包，但它不会自己生效。点右边「安装」才会真正装进插件目录，装完需要重启。")
+                : qsTr("后台推送插件包后，会先下载校验再出现在这里，必须由你在这台机器上点「安装」才生效。")
 
-            Button {
-                icon.name: "ic_fluent_checkmark_circle_20_regular"
-                text: qsTr("安装")
-                enabled: syncState !== "syncing"
-                onClicked: {
-                    const msg = backend.doInstallPending()
-                    const good = msg.indexOf(qsTr("已安装")) >= 0
-                    floatLayer.createInfoBar({
-                        title: qsTr("安装插件"),
-                        text: msg,
-                        severity: good ? Severity.Success : Severity.Warning,
-                        timeout: good ? 9000 : 6000,
-                    })
-                    refreshState()
+            RowLayout {
+                spacing: 8
+
+                Button {
+                    visible: pendingInstall.length > 0
+                    icon.name: "ic_fluent_checkmark_circle_20_regular"
+                    text: qsTr("安装")
+                    enabled: syncState !== "syncing"
+                    onClicked: {
+                        const msg = backend.doInstallPending()
+                        const good = msg.indexOf(qsTr("已安装")) >= 0
+                        floatLayer.createInfoBar({
+                            title: qsTr("安装插件"),
+                            text: msg,
+                            severity: good ? Severity.Success : Severity.Warning,
+                            timeout: good ? 9000 : 6000,
+                        })
+                        refreshState()
+                    }
+                }
+
+                Button {
+                    visible: pendingInstall.length > 0
+                    icon.name: "ic_fluent_delete_20_regular"
+                    text: qsTr("放弃")
+                    enabled: syncState !== "syncing"
+                    onClicked: {
+                        const msg = backend.doDiscardPending()
+                        floatLayer.createInfoBar({
+                            title: qsTr("放弃安装"),
+                            text: msg,
+                            severity: Severity.Info,
+                            timeout: 5000,
+                        })
+                        refreshState()
+                    }
+                }
+
+                Button {
+                    icon.name: "ic_fluent_arrow_sync_20_regular"
+                    text: qsTr("立即检查")
+                    enabled: paired && syncState !== "syncing"
+                    onClicked: backend.doSync()
                 }
             }
         }

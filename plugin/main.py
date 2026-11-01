@@ -732,7 +732,22 @@ class Plugin(CW2Plugin):
             "staged_at": datetime.now().isoformat(timespec="seconds"),
         }
         self._config.pending_install = json.dumps(record, ensure_ascii=False)
+        self._save_config()
+        self._notify(
+            "有插件等待安装",
+            f"{record['name']} v{version} 已下载校验。打开「课表同步」设置页最下面的「远程安装」点安装才会生效。",
+        )
         return True, f"已下载并校验 {pid} v{version}，等待在本机确认安装"
+
+    def _notify(self, title: str, message: str) -> None:
+        if self._provider is None:
+            return
+        try:
+            self._provider.push(
+                level=1, title=title, message=message, duration=12000, closable=True
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _pending_install_text(self) -> str:
         raw = self._config.pending_install or ""
@@ -793,7 +808,32 @@ class Plugin(CW2Plugin):
 
         self._set_plugin_enabled(pid, True)
         self._config.pending_install = ""
+        self._save_config()
+        self.configChanged.emit()
         return f"已安装 {rec.get('name') or pid} v{rec.get('version') or '?'}，请重启 Class Widgets 生效"
+
+    @Slot(result=str)
+    def doDiscardPending(self) -> str:
+        """用户拒绝安装：删掉暂存目录，清空待安装记录。"""
+        raw = self._config.pending_install or ""
+        if not raw:
+            return "没有待安装的插件"
+        try:
+            rec = json.loads(raw)
+        except Exception:  # noqa: BLE001
+            rec = {}
+        staged = Path(str(rec.get("staging") or ""))
+        root = self._plugins_dir()
+        try:
+            if staged.is_dir() and root.resolve() in staged.resolve().parents:
+                shutil.rmtree(staged, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            pass
+        name = rec.get("name") or rec.get("plugin_id") or "插件"
+        self._config.pending_install = ""
+        self._save_config()
+        self.configChanged.emit()
+        return f"已放弃安装 {name}"
 
     # ------------------------------------------------------------ 插件清单
     def _plugins_dir(self) -> Path:
@@ -945,13 +985,16 @@ class Plugin(CW2Plugin):
         if self._config.paired:
             self._timer.start(max(2, int(seconds)) * 1000)
 
+    def _save_config(self) -> None:
+        try:
+            self.api.config.save()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[ClassSync] 保存配置失败: {exc}")
+
     def _set_error(self, message: str) -> None:
         text = str(message)[:500]
         self._config.last_error = text
         self._config.last_message = text[:200]
-        try:
-            self.api.config.save()
-        except Exception:  # noqa: BLE001
-            pass
+        self._save_config()
         self.configChanged.emit()
         self.syncStatusChanged.emit("error", text)

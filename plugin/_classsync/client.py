@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.2.0"
 
 # 网络抖动（DNS 解析失败、连接被重置）很常见，重试 2 次
 MAX_ATTEMPTS = 3

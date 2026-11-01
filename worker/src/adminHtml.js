@@ -100,7 +100,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
 
   <div class="card">
     <div class="row">
-      <div><b>插件包</b> <span class="muted">只把包搬到设备上，真正安装要在那台机器上点确认</span></div>
+      <div><b>插件包</b> <span class="muted">只把包搬到设备上，真正安装要去那台机器的「课表同步 → 远程安装」点「安装」</span></div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
       <input type="file" id="pkgFile" accept=".cwplugin,.zip" />
@@ -337,7 +337,7 @@ function deviceCard(d){
     '</div>' +
     (d.pending_install
       ? '<div class="muted" style="color:var(--warn);margin-top:6px">待本机确认安装：' +
-        escapeHtml(d.pending_install) + '（已下载校验，需在那台机器上点确认）</div>'
+        escapeHtml(d.pending_install) + '（已下载校验，需在那台机器「课表同步 → 远程安装」点「安装」）</div>'
       : '') +
     '<hr>' +
     '<div class="row"><b>已装插件</b><span class="muted">' + ((d.plugins||[]).length) + ' 个</span></div>' +
@@ -364,7 +364,7 @@ function deviceCard(d){
     btn.onclick = function(){
       var pkgId = btn.getAttribute('data-plugin-upgrade');
       sendCommand(d.id, 'plugin_stage', {package_id: pkgId})
-        .then(function(){ toast('已排队升级，设备下次心跳下载并校验后，在那台机器上点「安装」'); })
+        .then(function(){ toast('已排队升级，设备下次心跳下载并校验后，去那台机器「课表同步 → 远程安装」点「安装」'); })
         .catch(function(e){ toast(e.message); });
     };
   });
@@ -441,7 +441,7 @@ function renderPackages(){
       var sel = box.querySelector('[data-pkg-target="' + pid + '"]');
       var deviceId = sel ? sel.value : '';
       if(!deviceId){ toast('先绑定一台设备'); return; }
-      if(!confirm('把包搬到设备上？会先校验 sha256 再解压到暂存区；真正生效还需要在那台机器的插件设置页点「安装」。')) return;
+      if(!confirm('把包搬到设备上？会先校验 sha256 再解压到暂存区；真正生效还需要在那台机器打开「课表同步」设置页，在「远程安装」里点「安装」。')) return;
       sendCommand(deviceId, 'plugin_stage', {package_id: pid})
         .then(function(){ toast('已排队：搬包到设备，等它下次心跳'); })
         .catch(function(e){ toast(e.message); });
@@ -566,7 +566,7 @@ function renderPlaza(){
       }).then(function(r){
         toast(only
           ? '已存到服务端：' + r.pkg.filename
-          : '已排队：设备下次心跳会下载校验，然后在那台机器上点「安装」');
+          : '已排队：设备下次心跳会下载校验，然后去那台机器「课表同步 → 远程安装」点「安装」');
         btn.disabled = false;
         btn.textContent = label;
         refresh();
