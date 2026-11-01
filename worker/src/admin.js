@@ -3,7 +3,9 @@
 import { randomId, randomCode, sha256, nowIso, ok, fail, readCookie, setCookie, clearCookie } from './util.js';
 import { getSetting, setSetting } from './db.js';
 import { readPluginManifest } from './zip.js';
-import { putPackageContent, dropPackageContent, MAX_PACKAGE_BYTES } from './packages.js';
+import {
+  putPackageContent, dropPackageContent, listPackageBodies, sweepStalePackageBodies, MAX_PACKAGE_BYTES,
+} from './packages.js';
 
 const COOKIE = 'cs_admin';
 
@@ -217,6 +219,16 @@ export async function state(env) {
      FROM packages ORDER BY created_at DESC LIMIT 30`
   ).all();
 
+  // 包体只暂存到设备取走，过期就清；顺手把「还有没有包体」带回去，
+  // 前端据此把发不出去的按钮置灰。
+  let bodies = new Set();
+  try {
+    await sweepStalePackageBodies(env);
+    bodies = await listPackageBodies(env);
+  } catch {
+    // 清理失败不影响后台正常使用
+  }
+
   const draftMap = Object.fromEntries((drafts || []).map((d) => [d.device_id, d.updated_at]));
   const latestMap = {};
   for (const s of schedules || []) {
@@ -250,7 +262,7 @@ export async function state(env) {
       online: d.last_seen ? Date.now() - Date.parse(d.last_seen) < graceMs : false,
       };
     }),
-    packages: packagesList || [],
+    packages: (packagesList || []).map((p) => ({ ...p, has_body: bodies.has(p.id) })),
     commands: commands || [],
     settings: settingMap,
     online_grace_seconds: graceSeconds,

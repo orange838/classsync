@@ -409,17 +409,21 @@ function renderPackages(){
   var h = '';
   list.forEach(function(p){
     var kb = Math.round((p.size || 0) / 1024);
+    // 包体只暂存到设备取走为止，取走后只剩元数据，不能再发
+    var noBody = p.has_body === false;
     h += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">' +
       '<span style="font-size:13px">' + escapeHtml(p.filename || p.id) + '</span>' +
       (p.plugin_version ? '<span class="pill ok">v' + escapeHtml(p.plugin_version) + '</span>' : '') +
       (p.source === 'plaza' ? '<span class="pill">广场</span>' : '') +
+      (noBody ? '<span class="pill">已发完·只剩记录</span>' : '') +
       '<span class="muted">' + kb + ' KB</span>' +
       '<span class="muted mono" style="font-size:11px" title="' + escapeHtml(p.sha256) + '">' +
         escapeHtml((p.sha256 || '').slice(0, 12)) + '…</span>' +
       '<span class="muted" style="font-size:11px">' + relTime(p.created_at) + '</span>' +
       '<span style="display:flex;gap:6px;margin-left:auto">' +
         '<select data-pkg-target="' + escapeHtml(p.id) + '" style="max-width:150px">' + devSel + '</select>' +
-        '<button data-pkg-send="' + escapeHtml(p.id) + '">发送到设备</button>' +
+        '<button data-pkg-send="' + escapeHtml(p.id) + '"' + (noBody ? ' disabled title="包体已在设备取走后释放，重新导入一次即可"' : '') + '>' +
+          (noBody ? '需重新导入' : '发送到设备') + '</button>' +
         '<button class="danger" data-pkg-del="' + escapeHtml(p.id) + '">删除</button>' +
       '</span></div>';
   });
@@ -578,7 +582,7 @@ function renderPlaza(){
 
 function syncPkgButton(box, pkgId){
   var btn = box.querySelector('[data-pkg-send="' + pkgId + '"]');
-  if(!btn) return;
+  if(!btn || btn.disabled) return;
   var sel = box.querySelector('[data-pkg-target="' + pkgId + '"]');
   var pkg = ((state && state.packages) || []).filter(function(x){ return x.id === pkgId; })[0];
   var dev = ((state && state.devices) || []).filter(function(x){ return sel && x.id === sel.value; })[0];

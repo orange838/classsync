@@ -2,7 +2,7 @@
 
 import { randomId, randomCode, sha256, nowIso, json, fail, ok } from './util.js';
 import { getDeviceByToken, updateDeviceRuntime, latestSchedule, getSetting } from './db.js';
-import { getPackageContent } from './packages.js';
+import { getPackageContent, dropPackageContent } from './packages.js';
 
 async function requireDevice(request, env) {
   const header = request.headers.get('authorization') || '';
@@ -30,7 +30,16 @@ export async function downloadPackage(request, env, packageId) {
   } catch {
     return fail('包内容已损坏', 500);
   }
-  if (!bytes) return fail('包内容已损坏', 500);
+  if (!bytes) return fail('包内容已损坏，或已被清理：重新在后台点一次', 410);
+
+  // 包只暂存到设备取走为止。取完立刻删包体，元数据（名字/版本/sha256）留着，
+  // 后台才能继续判断「已装未装」，也不不会白占免费存储。
+  // 万一设备重试下载，会收到 410，后台重推一次即可。
+  try {
+    await dropPackageContent(env, packageId);
+  } catch {
+    // 清理失败不影响本次下发
+  }
 
   return new Response(bytes, {
     status: 200,
