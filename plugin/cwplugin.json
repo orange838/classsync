@@ -1,11 +1,11 @@
 {
   "id": "org.cslblog.classsync",
   "name": "课表同步",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api_version": ">=0.4.2",
   "entry": "main.py",
   "author": "cslblog",
-  "description": "从自建服务器拉取课表，后台可实时查看各机器状态并手动发布课表",
+  "description": "从自建服务器拉取课表，后台实时查看各机器状态并手动发布；支持远程安装/升级插件与插件广场直推",
   "readme": "README.md",
   "icon": "icon.png",
   "url": "https://github.com/orange838/classsync"

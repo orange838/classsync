@@ -50,7 +50,7 @@ for f in ./migrations/*.sql; do
 done
 
 # 已上线的库补迁移时，只跑新增的那个
-# npx wrangler d1 execute classsync --remote --file=./migrations/0004_plaza.sql
+# npx wrangler d1 execute classsync --remote --file=./migrations/0005_package_chunks.sql
 
 # 设置后台管理密钥
 npx wrangler secret put ADMIN_KEY
@@ -60,7 +60,8 @@ npx wrangler deploy
 ```
 
 > 迁移清单：`0001_init` 基础表、`0002_plugins_and_login_throttle` 插件上报与登录限流、
-> `0003_packages` 插件包暂存、`0004_plaza` 插件包版本与来源（用于远程升级/广场导入）。
+> `0003_packages` 插件包暂存、`0004_plaza` 插件包版本与来源（用于远程升级/广场导入）、
+> `0005_package_chunks` 插件包体分块存储（突破 D1 单条 1 MB 限制，上限 20 MB）。
 
 > `*.workers.dev` 在部分网络下会被 DNS 污染，建议在 Cloudflare 控制台的
 > **Workers → 设置 → 域和路由 → 自定义域** 里绑定一个**子域名**
