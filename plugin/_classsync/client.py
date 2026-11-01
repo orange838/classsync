@@ -79,6 +79,38 @@ class ClassSyncClient:
     def unpair(self) -> dict[str, Any]:
         return self._post("/api/device/unpair", {})
 
+    def fetch_package_url(self, url: str) -> bytes:
+        """直接从外部地址（插件广场）下载包。
+
+        不走我们自己的服务器中转：广场的包地址本来就是公开的，
+        设备自己取更快，也不会把几 MB 的数据写进后台的免费数据库。
+        拿到的字节仍然会跟后台下发的 sha256 比对，对不上就丢。
+        """
+        if not url.startswith("https://"):
+            raise ApiError("插件包地址不合法")
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/octet-stream",
+                "User-Agent": f"ClassSync/{PLUGIN_VERSION}",
+            },
+            method="GET",
+        )
+        try:
+            _prefer_ipv4()
+            with urllib.request.urlopen(
+                request, timeout=max(self.timeout, 120.0), context=self._ctx
+            ) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            raise ApiError(f"插件广场返回 {exc.code}") from None
+        except urllib.error.URLError as exc:
+            raise ApiError(f"无法连接插件广场：{exc.reason}") from None
+        except TimeoutError:
+            raise ApiError("从插件广场下载超时") from None
+        except Exception as exc:  # noqa: BLE001
+            raise ApiError(f"从插件广场下载失败：{exc}") from None
+
     def fetch_package(self, package_id: str) -> bytes:
         """下载后台暂存的插件包（只下载，不安装）。"""
         if not self.server_url:

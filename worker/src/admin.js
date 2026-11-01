@@ -333,11 +333,15 @@ export async function pushCommand(request, env) {
   if (type === 'plugin_stage') {
     const packageId = String(body.payload?.package_id || '').trim();
     if (!packageId) return fail('缺少 package_id');
-    const pkg = await env.DB.prepare('SELECT id, sha256 FROM packages WHERE id = ?')
+    const pkg = await env.DB.prepare('SELECT id, sha256, content FROM packages WHERE id = ?')
       .bind(packageId)
       .first();
     if (!pkg) return fail('找不到这个插件包，可能已被删除');
-    body.payload = { package_id: pkg.id, sha256: pkg.sha256 };
+    // content 里存的是外部下载地址（广场直连），有就交给设备自己去取，不经过我们
+    const external = String(pkg.content || '');
+    body.payload = /^https:\/\//.test(external)
+      ? { package_id: pkg.id, sha256: pkg.sha256, url: external }
+      : { package_id: pkg.id, sha256: pkg.sha256 };
   }
 
   // 插件相关指令的参数校验

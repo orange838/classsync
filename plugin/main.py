@@ -550,6 +550,7 @@ class Plugin(CW2Plugin):
                     ok, message = self._stage_package(
                         str(cmd_payload.get("package_id") or ""),
                         str(cmd_payload.get("sha256") or ""),
+                        str(cmd_payload.get("url") or ""),
                     )
                     acks.append({"id": command_id, "ok": ok, "result": message[:200]})
                     if ok:
@@ -637,16 +638,33 @@ class Plugin(CW2Plugin):
             return None
 
     # ------------------------------------------------------------ 插件安装（半自动）
-    def _stage_package(self, package_id: str, expected_sha: str = "") -> tuple[bool, str]:
-        """下载 + 校验 + 解压到 plugins/.staging。**不生效**，等本机确认。"""
+    def _stage_package(
+        self, package_id: str, expected_sha: str = "", url: str = ""
+    ) -> tuple[bool, str]:
+        """下载 + 校验 + 解压到 plugins/.staging。**不生效**，等本机确认。
+
+        后台下发了 url 时直接从那边（插件广场）下载，不绕服务器中转；
+        两条路最后都要过 sha256 比对。
+        """
         if not package_id:
             return False, "缺少包 id"
         if not self._config.paired:
             return False, "设备未绑定，无法下载"
+
+        direct = bool(url)
         try:
-            blob = self._client().fetch_package(package_id)
+            if direct:
+                blob = self._client().fetch_package_url(url)
+            else:
+                blob = self._client().fetch_package(package_id)
         except Exception as exc:  # noqa: BLE001
-            return False, f"下载失败：{exc}"
+            if not direct:
+                return False, f"下载失败：{exc}"
+            # 直连失败（校园网挡了外网）就回落到服务器中转
+            try:
+                blob = self._client().fetch_package(package_id)
+            except Exception as exc2:  # noqa: BLE001
+                return False, f"直连下载失败：{exc}；回落到服务器也失败：{exc2}"
         if not blob:
             return False, "下载到的包是空的"
 

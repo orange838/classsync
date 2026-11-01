@@ -13,7 +13,7 @@
 //   GET /api/plugins/{id}/resources/release?format=cwplugin   包本体
 
 import { randomId, sha256, nowIso, ok, fail } from './util.js';
-import { putPackageContent, MAX_PACKAGE_BYTES } from './packages.js';
+import { MAX_PACKAGE_BYTES } from './packages.js';
 
 const PLAZA_BASE = 'https://plaza.cw.rinlit.cn';
 
@@ -119,50 +119,44 @@ export async function importFromPlaza(request, env) {
     .first();
   if (existed) return ok({ package: existed, reused: true });
 
-  let res;
+  // 包体不由我们中转：下载地址本来就是公开的，设备自己直连广场取即可。
+  // Worker 只记下地址和 sha256，下发时一起交给设备去校验。
+  const downloadUrl = `${PLAZA_BASE}/api/plugins/${encodeURIComponent(id)}/resources/release?format=cwplugin`;
+
+  let sha = '';
+  let size = 0;
   try {
-    res = await plazaFetch(`/api/plugins/${encodeURIComponent(id)}/resources/release?format=cwplugin`, {
+    const res = await plazaFetch(`/api/plugins/${encodeURIComponent(id)}/resources/release?format=cwplugin`, {
       timeoutMs: 25000,
+      method: 'HEAD',
     });
-  } catch (e) {
-    return fail('下载插件包失败：' + (e?.message || e));
-  }
-  if (!res.ok) return fail(`下载插件包失败：广场返回 ${res.status}`);
-
-  const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
-    return fail('广场给的不是 zip/cwplugin 包');
-  }
-  if (buf.length > MAX_IMPORT_BYTES) {
-    return fail(
-      `包太大（${Math.round(buf.length / 1024)} KB），上限 ${MAX_IMPORT_BYTES / 1024} KB。请在设备上手动安装。`
-    );
+    if (res.ok) size = Number(res.headers.get('content-length') || 0) || 0;
+  } catch {
+    // HEAD 不被支持也没关系，设备下载时靠 sha256 兜底
   }
 
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  const sha = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
   const pkgId = `pkg_${randomId('').slice(0, 10)}`;
   // 文件名要能看出是哪个插件、哪个版本，后台列表里不用再点开
   const filename = `${name}-${version || 'unknown'}.cwplugin`.slice(0, 200);
 
   await env.DB.prepare(
     `INSERT INTO packages(id, filename, sha256, size, content, created_at, plugin_id, plugin_version, source)
-     VALUES(?, ?, ?, ?, NULL, ?, ?, ?, ?)`
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(pkgId, filename, sha, buf.length, nowIso(), id, version, 'plaza')
+    .bind(pkgId, filename, sha, size, downloadUrl, nowIso(), id, version, 'plaza')
     .run();
-  await putPackageContent(env, pkgId, buf);
 
   return ok({
     package: {
       id: pkgId,
       filename,
       sha256: sha,
-      size: buf.length,
+      size,
       created_at: nowIso(),
       plugin_id: id,
       plugin_version: version,
       source: 'plaza',
+      download_url: downloadUrl,
     },
     reused: false,
   });
