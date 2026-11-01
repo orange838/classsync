@@ -10,6 +10,7 @@ import socket
 import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
@@ -77,6 +78,38 @@ class ClassSyncClient:
 
     def unpair(self) -> dict[str, Any]:
         return self._post("/api/device/unpair", {})
+
+    def fetch_package(self, package_id: str) -> bytes:
+        """下载后台暂存的插件包（只下载，不安装）。"""
+        if not self.server_url:
+            raise ApiError("服务器地址为空")
+        if not self.token:
+            raise ApiError("设备令牌缺失，请解除绑定后重新配对")
+        url = f"{self.server_url}/api/device/package/{urllib.parse.quote(str(package_id))}"
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/octet-stream",
+                "User-Agent": f"ClassSync/{PLUGIN_VERSION}",
+                "Authorization": f"Bearer {self.token}",
+            },
+            method="GET",
+        )
+        try:
+            _prefer_ipv4()
+            with urllib.request.urlopen(
+                request, timeout=max(self.timeout, 60.0), context=self._ctx
+            ) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            detail = _parse_error(exc)
+            raise ApiError(detail[0], exc.code, detail[1]) from None
+        except urllib.error.URLError as exc:
+            raise ApiError(f"无法连接服务器：{exc.reason}") from None
+        except TimeoutError:
+            raise ApiError("下载插件包超时") from None
+        except Exception as exc:  # noqa: BLE001
+            raise ApiError(f"下载插件包失败：{exc}") from None
 
     # ------------------------------------------------------------------ 内部
     def _post(self, path: str, payload: dict[str, Any], auth: bool = True) -> dict[str, Any]:

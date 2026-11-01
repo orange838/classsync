@@ -18,7 +18,11 @@ export const ALLOWED_COMMANDS = new Set([
   'restart_app',
   'plugin_set_enabled',
   'plugin_uninstall',
+  'plugin_stage',
 ]);
+
+/** 单包上限：base64 后约 2MB，对应原始包约 1.5MB */
+const MAX_PACKAGE_B64 = 2 * 1024 * 1024;
 
 /** 常量时间字符串比较，避免按字节提前返回泄露信息 */
 function timingSafeEqual(a, b) {
@@ -128,6 +132,54 @@ export async function logout() {
   });
 }
 
+/** 上传一个 .cwplugin 包（base64）。只搬包，不做任何安装动作。 */
+export async function uploadPackage(request, env) {
+  const body = await request.json().catch(() => null);
+  if (!body?.content) return fail('缺少文件内容');
+  const content = String(body.content).replace(/^data:[^;]+;base64,/, '');
+  if (content.length > MAX_PACKAGE_B64) {
+    return fail(`文件太大（上限约 ${Math.round((MAX_PACKAGE_B64 * 3) / 4 / 1024 / 1024)} MB）`);
+  }
+  const filename = String(body.filename || 'package.cwplugin').slice(0, 200);
+
+  let bytes;
+  try {
+    const bin = atob(content);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  } catch {
+    return fail('base64 解码失败');
+  }
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
+    return fail('不是 zip/cwplugin 包（文件头不对）');
+  }
+
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const sha256 = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const id = `pkg_${randomId('').slice(0, 10)}`;
+
+  await env.DB.prepare(
+    'INSERT INTO packages(id, filename, sha256, size, content, created_at) VALUES(?, ?, ?, ?, ?, ?)'
+  )
+    .bind(id, filename, sha256, bytes.length, content, nowIso())
+    .run();
+
+  return ok({ id, filename, sha256, size: bytes.length });
+}
+
+export async function listPackages(env) {
+  const rows = await env.DB.prepare(
+    'SELECT id, filename, sha256, size, created_at FROM packages ORDER BY created_at DESC LIMIT 30'
+  ).all();
+  return ok({ packages: rows.results || [] });
+}
+
+export async function deletePackage(env, id) {
+  if (!id) return fail('缺少包 id');
+  await env.DB.prepare('DELETE FROM packages WHERE id = ?').bind(id).run();
+  return ok({ deleted: id });
+}
+
 /** 让所有已登录的浏览器会话立即失效（会话纪元 +1） */
 export async function logoutAll(env) {
   const next = String(Number(await sessionEpoch(env) || 1) + 1);
@@ -149,6 +201,9 @@ export async function state(env) {
      ORDER BY created_at DESC LIMIT 30`
   ).all();
   const { results: settings } = await env.DB.prepare('SELECT key, value FROM settings').all();
+  const { results: packagesList } = await env.DB.prepare(
+    'SELECT id, filename, sha256, size, created_at FROM packages ORDER BY created_at DESC LIMIT 30'
+  ).all();
 
   const draftMap = Object.fromEntries((drafts || []).map((d) => [d.device_id, d.updated_at]));
   const latestMap = {};
@@ -183,6 +238,7 @@ export async function state(env) {
       online: d.last_seen ? Date.now() - Date.parse(d.last_seen) < graceMs : false,
       };
     }),
+    packages: packagesList || [],
     commands: commands || [],
     settings: settingMap,
     online_grace_seconds: graceSeconds,
@@ -249,6 +305,16 @@ export async function pushCommand(request, env) {
   if (!body?.device_id || !body?.type) return fail('缺少 device_id 或 type');
   const type = String(body.type);
   if (!ALLOWED_COMMANDS.has(type)) return fail(`不支持的指令类型：${type}`);
+
+  if (type === 'plugin_stage') {
+    const packageId = String(body.payload?.package_id || '').trim();
+    if (!packageId) return fail('缺少 package_id');
+    const pkg = await env.DB.prepare('SELECT id, sha256 FROM packages WHERE id = ?')
+      .bind(packageId)
+      .first();
+    if (!pkg) return fail('找不到这个插件包，可能已被删除');
+    body.payload = { package_id: pkg.id, sha256: pkg.sha256 };
+  }
 
   // 插件相关指令的参数校验
   if (type === 'plugin_set_enabled' || type === 'plugin_uninstall') {

@@ -10,10 +10,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import os
+import re
 import shutil
 import socket
 import time
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -198,6 +202,7 @@ class Plugin(CW2Plugin):
             "schedule_hash": self._config.schedule_hash,
             "last_error": self._config.last_error,
             "plugins": self._plugins_snapshot(),
+            "pending_install": self._pending_install_text(),
         }
         if self._config.pending_acks:
             payload["acks"] = self._config.pending_acks
@@ -540,6 +545,15 @@ class Plugin(CW2Plugin):
                     acks.append({"id": command_id, "ok": ok, "result": message[:200]})
                     if ok:
                         immediate = True
+                elif command_type == "plugin_stage":
+                    cmd_payload = command.get("payload") or {}
+                    ok, message = self._stage_package(
+                        str(cmd_payload.get("package_id") or ""),
+                        str(cmd_payload.get("sha256") or ""),
+                    )
+                    acks.append({"id": command_id, "ok": ok, "result": message[:200]})
+                    if ok:
+                        immediate = True
                 elif command_type == "plugin_uninstall":
                     cmd_payload = command.get("payload") or {}
                     ok, message = self._uninstall_plugin(str(cmd_payload.get("id") or ""))
@@ -621,6 +635,147 @@ class Plugin(CW2Plugin):
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[ClassSync] 课表文件读取失败: {exc}")
             return None
+
+    # ------------------------------------------------------------ 插件安装（半自动）
+    def _stage_package(self, package_id: str, expected_sha: str = "") -> tuple[bool, str]:
+        """下载 + 校验 + 解压到 plugins/.staging。**不生效**，等本机确认。"""
+        if not package_id:
+            return False, "缺少包 id"
+        if not self._config.paired:
+            return False, "设备未绑定，无法下载"
+        try:
+            blob = self._client().fetch_package(package_id)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"下载失败：{exc}"
+        if not blob:
+            return False, "下载到的包是空的"
+
+        actual = hashlib.sha256(blob).hexdigest()
+        if expected_sha and actual.lower() != str(expected_sha).lower():
+            return False, "包校验失败（sha256 不匹配），已丢弃"
+
+        root = self._plugins_dir()
+        staging_root = root / ".staging"
+        target = staging_root / f"pkg-{re.sub(r'[^A-Za-z0-9._-]', '_', package_id)}"
+        try:
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"创建暂存目录失败：{exc}"
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                entries = [i for i in zf.infolist() if not i.filename.endswith("/")]
+                if len(entries) > 2000:
+                    return False, "包内文件过多，已拒绝"
+                base = str(target.resolve()) + os.sep
+                for info in entries:
+                    resolved = str((target / info.filename).resolve())
+                    if not resolved.startswith(base):
+                        return False, f"包内路径非法：{info.filename}"
+                zf.extractall(target)
+        except zipfile.BadZipFile:
+            return False, "不是合法的插件包"
+        except Exception as exc:  # noqa: BLE001
+            return False, f"解压失败：{exc}"
+
+        manifest = target / "cwplugin.json"
+        if not manifest.is_file():
+            subdirs = [d for d in target.iterdir() if d.is_dir()]
+            if len(subdirs) == 1 and (subdirs[0] / "cwplugin.json").is_file():
+                target = subdirs[0]
+                manifest = target / "cwplugin.json"
+        if not manifest.is_file():
+            return False, "包内没有 cwplugin.json"
+
+        try:
+            meta = json.loads(manifest.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return False, "cwplugin.json 不是合法 JSON"
+
+        pid = str(meta.get("id") or "")
+        version = str(meta.get("version") or "")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", pid or ""):
+            return False, "包内插件 id 非法"
+        if pid.startswith("builtin."):
+            return False, "内置插件包不允许安装"
+        if pid == PLUGIN_ID:
+            return False, "不能用远程安装覆盖本插件，请在本机处理"
+
+        record = {
+            "package_id": package_id,
+            "plugin_id": pid,
+            "name": str(meta.get("name") or pid),
+            "version": version,
+            "staging": str(target),
+            "sha256": actual,
+            "size": len(blob),
+            "staged_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        self._config.pending_install = json.dumps(record, ensure_ascii=False)
+        return True, f"已下载并校验 {pid} v{version}，等待在本机确认安装"
+
+    def _pending_install_text(self) -> str:
+        raw = self._config.pending_install or ""
+        if not raw:
+            return ""
+        try:
+            rec = json.loads(raw)
+            return f"{rec.get('name') or rec.get('plugin_id')} v{rec.get('version') or '?'}"
+        except Exception:  # noqa: BLE001
+            return ""
+
+    @Slot(result=str)
+    def getPendingInstall(self) -> str:
+        return self._pending_install_text()
+
+    @Slot(result=str)
+    def doInstallPending(self) -> str:
+        raw = self._config.pending_install or ""
+        if not raw:
+            return "没有待安装的插件"
+        try:
+            rec = json.loads(raw)
+        except Exception:  # noqa: BLE001
+            self._config.pending_install = ""
+            return "待安装记录损坏，已清除"
+
+        pid = str(rec.get("plugin_id") or "")
+        src = Path(str(rec.get("staging") or ""))
+        root = self._plugins_dir()
+        if not pid or not src.is_dir():
+            self._config.pending_install = ""
+            return "暂存目录已不存在，请重新下载"
+
+        # 只能在 plugins/.staging 下，避免任意目录被移进插件目录
+        try:
+            if root.resolve() not in src.resolve().parents:
+                return "暂存路径非法，已拒绝"
+        except Exception:  # noqa: BLE001
+            return "暂存路径无法校验，已拒绝"
+
+        dest = root / pid
+        backup_root = root / ".backups"
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        moved_to = None
+        try:
+            backup_root.mkdir(parents=True, exist_ok=True)
+            if dest.exists():
+                moved_to = backup_root / f"{pid}-{stamp}"
+                shutil.move(str(dest), str(moved_to))
+            shutil.move(str(src), str(dest))
+        except Exception as exc:  # noqa: BLE001
+            try:
+                if moved_to and moved_to.exists() and not dest.exists():
+                    shutil.move(str(moved_to), str(dest))
+            except Exception:  # noqa: BLE001
+                pass
+            return f"安装失败：{exc}"
+
+        self._set_plugin_enabled(pid, True)
+        self._config.pending_install = ""
+        return f"已安装 {rec.get('name') or pid} v{rec.get('version') or '?'}，请重启 Class Widgets 生效"
 
     # ------------------------------------------------------------ 插件清单
     def _plugins_dir(self) -> Path:
@@ -756,7 +911,7 @@ class Plugin(CW2Plugin):
             return False, f"移动到备份目录失败：{exc}"
 
         note = "" if ok_enable else f"（{msg_enable}）"
-        return True, f"已卸载 {plugin_id}，备份在 plugins\\.backups\\\\{dest.name}{note}，重启后生效"
+        return True, f"已卸载 {plugin_id}，备份在 plugins/.backups/{dest.name}{note}，重启后生效"
 
     def _queue_restart(self) -> None:
         QTimer.singleShot(1500, self.api.application.restart)

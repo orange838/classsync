@@ -1,0 +1,32 @@
+name: Check Worker
+
+# 后台页面是「模板字符串里套 HTML、HTML 里套 <script>」的结构，
+# 源文件语法正确不代表求值后依然正确（模板字符串会再解析一层转义）。
+# 这里对求值后的脚本做一次编译校验，避免 SyntaxError 直接进线上。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+      - 'scripts/**'
+      - '.github/workflows/check-worker.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 校验后台内联脚本
+        run: node scripts/check-admin-html.mjs
+
+      - name: 校验 worker 各模块语法
+        run: |
+          set -e
+          for f in worker/src/*.js; do
+            node --input-type=module --check < "$f"
+            echo "ok: $f"
+          done

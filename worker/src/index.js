@@ -1,7 +1,8 @@
-import { pairDevice, syncDevice, unpairDevice } from './device.js';
+import { pairDevice, syncDevice, unpairDevice, downloadPackage } from './device.js';
 import {
   requireAdmin, login, logout, logoutAll, state, saveDraft, getDraft, publish,
   makePairingCode, pushCommand, updateSettings, deleteDevice,
+  uploadPackage, listPackages, deletePackage,
 } from './admin.js';
 import { fail } from './util.js';
 import { ADMIN_HTML } from './adminHtml.js';
@@ -27,6 +28,9 @@ export default {
       if (path === '/api/device/pair' && method === 'POST') return cors(await pairDevice(request, env));
       if (path === '/api/device/sync' && method === 'POST') return cors(await syncDevice(request, env));
       if (path === '/api/device/unpair' && method === 'POST') return cors(await unpairDevice(request, env));
+      if (path.startsWith('/api/device/package/') && method === 'GET') {
+        return cors(await downloadPackage(request, env, path.slice('/api/device/package/'.length)));
+      }
 
       // ---- 后台 ----
       if (path === '/' || path === '/admin') {
@@ -44,6 +48,11 @@ export default {
         if (path === '/api/admin/command' && method === 'POST') return await pushCommand(request, env);
         if (path === '/api/admin/settings' && method === 'POST') return await updateSettings(request, env);
         if (path === '/api/admin/logout-all' && method === 'POST') return await logoutAll(env);
+        if (path === '/api/admin/package' && method === 'POST') return await uploadPackage(request, env);
+        if (path === '/api/admin/package' && method === 'GET') return await listPackages(env);
+        if (path.startsWith('/api/admin/package/') && method === 'DELETE') {
+          return await deletePackage(env, path.slice('/api/admin/package/'.length));
+        }
 
         const draftMatch = path.match(/^\/api\/admin\/draft\/([^/]+)$/);
         if (draftMatch) {

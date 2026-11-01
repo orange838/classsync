@@ -88,6 +88,18 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
   </div>
   <div class="card">
     <div class="row">
+      <div><b>插件包</b> <span class="muted">只把包搬到设备上，真正安装要在那台机器上点确认</span></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+      <input type="file" id="pkgFile" accept=".cwplugin,.zip" />
+      <button id="pkgUpload">上传</button>
+      <span class="muted" id="pkgHint">上限约 1.5 MB。上传后会显示 sha256，设备下载时会校验</span>
+    </div>
+    <div id="pkgList" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
       <b>最近指令</b>
       <span class="muted" id="autoHint" style="margin-left:auto;margin-right:12px">自动刷新已开启</span>
       <button id="refreshBtn">刷新</button>
@@ -105,7 +117,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
     </div>
     <hr>
     <div class="muted" style="margin-bottom:8px">CW2 课表 JSON：包含 meta / subjects / days / overrides。改完先存草稿，确认无误再点发布。<br>
-      手边有现成课表就点「导入本地文件」，直接选 <span class="mono">school.json</span>（便携版在 <span class="mono">CW2 目录\data\configs\schedules\</span>，普通版在 <span class="mono">%LOCALAPPDATA%\Class_Widgets_2\configs\schedules\</span>）。</div>
+      手边有现成课表就点「导入本地文件」，直接选 <span class="mono">school.json</span>（便携版在 <span class="mono">CW2 安装目录/data/configs/schedules/</span>，普通版在 <span class="mono">%LOCALAPPDATA%/Class_Widgets_2/configs/schedules/</span>）。</div>
     <textarea id="schedText" spellcheck="false"></textarea>
     <div class="row" style="margin-top:12px">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -229,6 +241,7 @@ function render(){
   if(document.activeElement !== el('pollInput')){
     el('pollInput').value = state.settings.poll_interval || '30';
   }
+  renderPackages();
   if(state.online_grace_seconds && el('pollHint')){
     el('pollHint').textContent = '建议 60–300；最小 15 秒。超过 ' +
       state.online_grace_seconds + ' 秒没心跳算离线（自动跟随间隔×2）';
@@ -295,6 +308,10 @@ function deviceCard(d){
       '数据目录 <span class="mono">' + escapeHtml(d.data_dir || '—') + '</span>' +
       (d.last_error ? '<br><span style="color:var(--err)">' + escapeHtml(d.last_error) + '</span>' : '') +
     '</div>' +
+    (d.pending_install
+      ? '<div class="muted" style="color:var(--warn);margin-top:6px">待本机确认安装：' +
+        escapeHtml(d.pending_install) + '（已下载校验，需在那台机器上点确认）</div>'
+      : '') +
     '<hr>' +
     '<div class="row"><b>已装插件</b><span class="muted">' + ((d.plugins||[]).length) + ' 个</span></div>' +
     '<div style="margin-top:6px">' + pluginsHtml(d) + '</div>' +
@@ -324,8 +341,8 @@ function deviceCard(d){
   card.querySelectorAll('[data-plugin-remove]').forEach(function(btn){
     btn.onclick = function(){
       var pid = btn.getAttribute('data-plugin-remove');
-      if(!confirm('卸载插件「' + pid + '」？\n\n会移到 plugins\\.backups 里，可恢复，但需要重启才生效。')) return;
-      var typed = prompt('请输入插件 id 以确认：\n' + pid);
+      if(!confirm('卸载插件「' + pid + '」？会移到备份目录 plugins/.backups，可恢复，但需要重启才生效。')) return;
+      var typed = prompt('请输入插件 id 以确认：' + pid);
       if(typed !== pid){ if(typed !== null) toast('id 不一致，已取消'); return; }
       sendCommand(d.id, 'plugin_uninstall', {id: pid})
         .then(function(){ toast('已排队卸载：' + pid); })
@@ -337,6 +354,57 @@ function deviceCard(d){
     api('/api/admin/device/' + d.id, {method:'DELETE'}).then(refresh).catch(function(e){ toast(e.message); });
   };
   return card;
+}
+
+function renderPackages(){
+  var box = el('pkgList');
+  if(!box) return;
+  var list = state.packages || [];
+  if(!list.length){
+    box.innerHTML = '<div class="muted">还没有上传过插件包</div>';
+    return;
+  }
+  var devSel = (state.devices || []).map(function(d){
+    return '<option value="' + escapeHtml(d.id) + '">' + escapeHtml(d.name) + '</option>';
+  }).join('');
+  var h = '';
+  list.forEach(function(p){
+    var kb = Math.round((p.size || 0) / 1024);
+    h += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">' +
+      '<span style="font-size:13px">' + escapeHtml(p.filename || p.id) + '</span>' +
+      '<span class="muted">' + kb + ' KB</span>' +
+      '<span class="muted mono" style="font-size:11px" title="' + escapeHtml(p.sha256) + '">' +
+        escapeHtml((p.sha256 || '').slice(0, 12)) + '…</span>' +
+      '<span class="muted" style="font-size:11px">' + relTime(p.created_at) + '</span>' +
+      '<span style="display:flex;gap:6px;margin-left:auto">' +
+        '<select data-pkg-target="' + escapeHtml(p.id) + '" style="max-width:150px">' + devSel + '</select>' +
+        '<button data-pkg-send="' + escapeHtml(p.id) + '">发送到设备</button>' +
+        '<button class="danger" data-pkg-del="' + escapeHtml(p.id) + '">删除</button>' +
+      '</span></div>';
+  });
+  box.innerHTML = h;
+
+  box.querySelectorAll('[data-pkg-send]').forEach(function(btn){
+    btn.onclick = function(){
+      var pid = btn.getAttribute('data-pkg-send');
+      var sel = box.querySelector('[data-pkg-target="' + pid + '"]');
+      var deviceId = sel ? sel.value : '';
+      if(!deviceId){ toast('先绑定一台设备'); return; }
+      if(!confirm('把包搬到设备上？会先校验 sha256 再解压到暂存区；真正生效还需要在那台机器的插件设置页点「安装」。')) return;
+      sendCommand(deviceId, 'plugin_stage', {package_id: pid})
+        .then(function(){ toast('已排队：搬包到设备，等它下次心跳'); })
+        .catch(function(e){ toast(e.message); });
+    };
+  });
+  box.querySelectorAll('[data-pkg-del]').forEach(function(btn){
+    btn.onclick = function(){
+      var pid = btn.getAttribute('data-pkg-del');
+      if(!confirm('删除这个插件包？设备已下载的不受影响。')) return;
+      api('/api/admin/package/' + encodeURIComponent(pid), {method:'DELETE'})
+        .then(function(){ toast('已删除'); refresh(); })
+        .catch(function(e){ toast(e.message); });
+    };
+  });
 }
 
 function pluginsHtml(d){
@@ -451,6 +519,21 @@ function parseSchedule(){
 }
 
 el('modalClose').onclick = function(){ el('mask').classList.remove('show'); refresh().catch(function(){}); };
+el('pkgUpload').onclick = function(){
+  var f = el('pkgFile').files && el('pkgFile').files[0];
+  if(!f){ toast('先选一个 .cwplugin 或 .zip'); return; }
+  if(f.size > 1.5 * 1024 * 1024){ toast('文件太大（上限约 1.5 MB）'); return; }
+  var reader = new FileReader();
+  reader.onload = function(){
+    var b64 = String(reader.result || '').split(',')[1] || '';
+    api('/api/admin/package', {method:'POST', body: JSON.stringify({filename: f.name, content: b64})})
+      .then(function(j){ toast('已上传，sha256 ' + j.sha256.slice(0, 12) + '…'); el('pkgFile').value = ''; refresh(); })
+      .catch(function(e){ toast(e.message); });
+  };
+  reader.onerror = function(){ toast('读取文件失败'); };
+  reader.readAsDataURL(f);
+};
+
 el('btnImport').onclick = function(){ el('fileInput').value = ''; el('fileInput').click(); };
 el('fileInput').onchange = function(){
   var file = el('fileInput').files && el('fileInput').files[0];
@@ -520,8 +603,8 @@ function updateHint(){
     sync_now: '请设备尽快发一次同步请求。设备平时在睡觉，要等它下一次心跳才会收到 —— 最长等一个轮询间隔。',
     upload_schedule: '让设备把当前课表传到后台草稿区，之后可以在这里改。',
     switch_portable: (currentDevice && currentDevice.data_mode === 'portable')
-      ? '当前是便携版（数据在程序目录）。切换会把数据复制到用户目录 %LOCALAPPDATA%\\Class_Widgets_2，然后重启程序；原数据不会被删除。'
-      : '当前是用户目录（数据在 C 盘）。切换会把数据复制到程序目录下的 data\\，然后重启程序；原数据不会被删除。',
+      ? '当前是便携版（数据在程序目录）。切换会把数据复制到用户目录（%LOCALAPPDATA% 下），然后重启程序；原数据不会被删除。'
+      : '当前是用户目录（数据在 C 盘）。切换会把数据复制到程序目录下的 data 文件夹，然后重启程序；原数据不会被删除。',
     restart_app: '直接重启 Class Widgets 2。'
   };
   el('cmdHint').textContent = hints[t] || '';

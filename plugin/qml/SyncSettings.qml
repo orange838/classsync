@@ -18,6 +18,7 @@ PluginPage {
     property bool portable: false
     property int scheduleRevision: 0
     property string pendingInfo: ""
+    property string pendingInstall: ""
     property string syncState: "ready"
     property string syncMessage: qsTr("就绪")
 
@@ -58,6 +59,7 @@ PluginPage {
         lastError = backend.getLastError()
         lastMessage = backend.getLastMessage()
         modeInfo = backend.getModeInfo()
+        pendingInstall = backend.getPendingInstall()
         portable = backend.isPortable()
         scheduleRevision = backend.getScheduleRevision()
         pendingInfo = backend.getPendingInfo()
@@ -180,6 +182,38 @@ PluginPage {
                 if (lastError.length > 0) lines.push(qsTr("错误：") + lastError)
                 else if (lastMessage.length > 0) lines.push(lastMessage)
                 return lines.join("\n")
+            }
+        }
+
+        // ---------------------------------------------------------- 待安装插件（后台只能把包搬过来，生效必须在本机点）
+        Text {
+            visible: pendingInstall.length > 0
+            text: qsTr("待安装插件")
+            typography: Typography.BodyStrong
+        }
+
+        SettingCard {
+            Layout.fillWidth: true
+            visible: pendingInstall.length > 0
+            icon.name: "ic_fluent_arrow_download_20_regular"
+            title: qsTr("已下载待安装：") + pendingInstall
+            description: qsTr("后台已经下载并校验过这个包，但不会自己生效。点下面的按钮才会真正装进插件目录；装完需要重启。")
+
+            Button {
+                icon.name: "ic_fluent_checkmark_circle_20_regular"
+                text: qsTr("安装")
+                enabled: syncState !== "syncing"
+                onClicked: {
+                    const msg = backend.doInstallPending()
+                    const good = msg.indexOf(qsTr("已安装")) >= 0
+                    floatLayer.createInfoBar({
+                        title: qsTr("安装插件"),
+                        text: msg,
+                        severity: good ? Severity.Success : Severity.Warning,
+                        timeout: good ? 9000 : 6000,
+                    })
+                    refreshState()
+                }
             }
         }
 

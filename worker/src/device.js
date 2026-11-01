@@ -12,6 +12,38 @@ async function requireDevice(request, env) {
   return { device };
 }
 
+/** GET /api/device/package/:id —— 只下发后台暂存过的包，需要设备令牌 */
+export async function downloadPackage(request, env, packageId) {
+  const auth = await requireDevice(request, env);
+  if (auth.error) return auth.error;
+  if (!packageId) return fail('缺少包 id');
+
+  const row = await env.DB.prepare('SELECT filename, sha256, content FROM packages WHERE id = ?')
+    .bind(packageId)
+    .first();
+  if (!row) return fail('包不存在或已被删除', 404);
+
+  let bytes;
+  try {
+    const bin = atob(row.content);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  } catch {
+    return fail('包内容已损坏', 500);
+  }
+
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      'content-type': 'application/octet-stream',
+      'content-length': String(bytes.length),
+      'content-disposition': `attachment; filename="${String(row.filename || 'package.cwplugin').replace(/[^A-Za-z0-9._-]/g, '_')}"`,
+      'x-package-sha256': row.sha256,
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 /** POST /api/device/pair */
 export async function pairDevice(request, env) {
   let body;
@@ -111,6 +143,7 @@ export async function syncDevice(request, env) {
     data_mode: cert.data_mode ?? null,
     data_dir: cert.data_dir ?? null,
     plugins_json: pluginsJson,
+    pending_install: typeof body.pending_install === 'string' ? body.pending_install.slice(0, 120) : null,
     last_error: body.last_error ?? null,
   });
 

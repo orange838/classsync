@@ -43,6 +43,7 @@ export async function updateDeviceRuntime(env, device, patch) {
     device.data_mode !== patch.data_mode ||
     device.data_dir !== patch.data_dir ||
     (device.plugins_json || null) !== pluginsJson ||
+    (device.pending_install || null) !== (patch.pending_install ?? device.pending_install ?? null) ||
     (device.last_error || '') !== (patch.last_error || '');
 
   if (!changed) {
@@ -58,7 +59,7 @@ export async function updateDeviceRuntime(env, device, patch) {
   await env.DB.prepare(
     `UPDATE devices SET last_seen=?, status=?, current_title=?, period_end=?, next_title=?,
      app_version=?, plugin_version=?, data_mode=?, data_dir=?, schedule_rev=?, schedule_hash=?,
-     plugins_json=?, last_error=?
+     plugins_json=?, pending_install=?, last_error=?
      WHERE id=?`
   )
     .bind(
@@ -74,6 +75,7 @@ export async function updateDeviceRuntime(env, device, patch) {
       patch.schedule_rev ?? 0,
       patch.schedule_hash ?? null,
       pluginsJson,
+      patch.pending_install ?? device.pending_install ?? null,
       patch.last_error ?? null,
       device.id
     )
