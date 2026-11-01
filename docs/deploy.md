@@ -44,8 +44,13 @@ npm install
 # 创建 D1 数据库，把返回的 database_id 填进 wrangler.toml
 npx wrangler d1 create classsync
 
-# 建表（远程）
-npx wrangler d1 execute classsync --remote --file=./migrations/0001_init.sql
+# 建表（远程），按编号顺序全部执行
+for f in ./migrations/*.sql; do
+  npx wrangler d1 execute classsync --remote --file=$f
+done
+
+# 已上线的库补迁移时，只跑新增的那个
+# npx wrangler d1 execute classsync --remote --file=./migrations/0004_plaza.sql
 
 # 设置后台管理密钥
 npx wrangler secret put ADMIN_KEY
@@ -53,6 +58,9 @@ npx wrangler secret put ADMIN_KEY
 # 部署
 npx wrangler deploy
 ```
+
+> 迁移清单：`0001_init` 基础表、`0002_plugins_and_login_throttle` 插件上报与登录限流、
+> `0003_packages` 插件包暂存、`0004_plaza` 插件包版本与来源（用于远程升级/广场导入）。
 
 > `*.workers.dev` 在部分网络下会被 DNS 污染，建议在 Cloudflare 控制台的
 > **Workers → 设置 → 域和路由 → 自定义域** 里绑定一个**子域名**

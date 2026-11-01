@@ -88,6 +88,18 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
   </div>
   <div class="card">
     <div class="row">
+      <div><b>插件广场</b> <span class="muted">从广场取包，经服务端校验后推到设备</span></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+      <input id="plazaQ" placeholder="搜索插件名或 id，留空看最近更新" style="flex:1;min-width:180px" />
+      <button id="plazaSearch">搜索</button>
+      <span class="muted">包上限 700 KB</span>
+    </div>
+    <div id="plazaList" style="margin-top:12px"><div class="muted">点搜索加载广场列表</div></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
       <div><b>插件包</b> <span class="muted">只把包搬到设备上，真正安装要在那台机器上点确认</span></div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
@@ -254,6 +266,9 @@ function render(){
     el('pollInput').value = state.settings.poll_interval || '30';
   }
   renderPackages();
+  // 广场列表不跟着 15 秒自动刷新重绘，否则设备下拉框会一直被重置；
+  // 只有设备插件版本或服务端包列表变了才重绘
+  if(plazaItems.length && plazaSig !== plazaSignature()) renderPlaza();
   if(state.online_grace_seconds && el('pollHint')){
     el('pollHint').textContent = '建议 60–300；最小 15 秒。超过 ' +
       state.online_grace_seconds + ' 秒没心跳算离线（自动跟随间隔×2）';
@@ -345,6 +360,14 @@ function deviceCard(d){
     }).catch(function(e){ toast(e.message); });
   };
   card.querySelector('[data-act="cmd"]').onclick = function(){ openCmd(d); };
+  card.querySelectorAll('[data-plugin-upgrade]').forEach(function(btn){
+    btn.onclick = function(){
+      var pkgId = btn.getAttribute('data-plugin-upgrade');
+      sendCommand(d.id, 'plugin_stage', {package_id: pkgId})
+        .then(function(){ toast('已排队升级，设备下次心跳下载并校验后，在那台机器上点「安装」'); })
+        .catch(function(e){ toast(e.message); });
+    };
+  });
   card.querySelectorAll('[data-plugin-toggle]').forEach(function(btn){
     btn.onclick = function(){
       var pid = btn.getAttribute('data-plugin-toggle');
@@ -388,6 +411,8 @@ function renderPackages(){
     var kb = Math.round((p.size || 0) / 1024);
     h += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">' +
       '<span style="font-size:13px">' + escapeHtml(p.filename || p.id) + '</span>' +
+      (p.plugin_version ? '<span class="pill ok">v' + escapeHtml(p.plugin_version) + '</span>' : '') +
+      (p.source === 'plaza' ? '<span class="pill">广场</span>' : '') +
       '<span class="muted">' + kb + ' KB</span>' +
       '<span class="muted mono" style="font-size:11px" title="' + escapeHtml(p.sha256) + '">' +
         escapeHtml((p.sha256 || '').slice(0, 12)) + '…</span>' +
@@ -399,6 +424,12 @@ function renderPackages(){
       '</span></div>';
   });
   box.innerHTML = h;
+
+  // 目标设备已装这个插件时，把「发送」改成「升级到 vX」
+  box.querySelectorAll('[data-pkg-target]').forEach(function(sel){
+    sel.onchange = function(){ syncPkgButton(box, sel.getAttribute('data-pkg-target')); };
+    syncPkgButton(box, sel.getAttribute('data-pkg-target'));
+  });
 
   box.querySelectorAll('[data-pkg-send]').forEach(function(btn){
     btn.onclick = function(){
@@ -423,18 +454,161 @@ function renderPackages(){
   });
 }
 
+var plazaItems = [];
+var plazaSig = '';
+
+function plazaSignature(){
+  var s = '';
+  ((state && state.devices) || []).forEach(function(d){
+    (d.plugins || []).forEach(function(p){ s += p.id + ':' + (p.version || '') + ';'; });
+  });
+  s += '|';
+  ((state && state.packages) || []).forEach(function(p){
+    s += (p.plugin_id || '') + ':' + (p.plugin_version || '') + ';';
+  });
+  return s;
+}
+
+// 任一设备上装过的这个插件，取到版本号（多台机器取第一个非空的）
+function installedVersionOf(pluginId){
+  var list = (state && state.devices) || [];
+  for(var i=0;i<list.length;i++){
+    var ps = list[i].plugins || [];
+    for(var k=0;k<ps.length;k++){
+      if(ps[k].id === pluginId && ps[k].version) return ps[k].version;
+    }
+  }
+  return '';
+}
+
+// 服务端现有包里，有没有这个插件的新版本
+function upgradePkgFor(pluginId, currentVersion){
+  var list = (state && state.packages) || [];
+  for(var i=0;i<list.length;i++){
+    var p = list[i];
+    if(p.plugin_id === pluginId && p.plugin_version && p.plugin_version !== currentVersion) return p;
+  }
+  return null;
+}
+
+function loadPlaza(q){
+  var box = el('plazaList');
+  if(!box) return;
+  box.innerHTML = '<div class="muted">加载中…</div>';
+  api('/api/admin/plaza?q=' + encodeURIComponent(q || '')).then(function(j){
+    plazaItems = j.items || [];
+    renderPlaza();
+  }).catch(function(e){
+    box.innerHTML = '<div class="muted" style="color:var(--err)">加载失败：' + escapeHtml(e.message) + '</div>';
+  });
+}
+
+function renderPlaza(){
+  var box = el('plazaList');
+  if(!box) return;
+  if(!plazaItems.length){
+    box.innerHTML = '<div class="muted">没找到插件</div>';
+    return;
+  }
+  var devs = (state && state.devices) || [];
+  var devSel = devs.map(function(d){
+    return '<option value="' + escapeHtml(d.id) + '">' + escapeHtml(d.name) + '</option>';
+  }).join('');
+
+  var h = '';
+  plazaItems.forEach(function(p){
+    var installed = installedVersionOf(p.id);
+    var tag;
+    if(!installed){
+      tag = '<span class="pill">未安装</span>';
+    } else if(installed === p.version){
+      tag = '<span class="pill ok">已是最新</span>';
+    } else {
+      tag = '<span class="pill warn">' + escapeHtml(installed) + ' → ' + escapeHtml(p.version) + '</span>';
+    }
+    var acts = '';
+    if(devs.length){
+      acts = '<select data-plaza-target="' + escapeHtml(p.id) + '" style="max-width:150px">' + devSel + '</select>' +
+        '<button data-plaza-send="' + escapeHtml(p.id) + '">' +
+        (installed && installed !== p.version ? '升级' : '推到设备') + '</button>';
+    } else {
+      acts = '<button data-plaza-send="' + escapeHtml(p.id) + '" data-import-only="1">导到服务端</button>';
+    }
+    h += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;flex-wrap:wrap">' +
+      '<span style="font-size:13px">' + escapeHtml(p.name) + '</span>' +
+      '<span class="muted mono" style="font-size:11px">' + escapeHtml(p.id) + '</span>' +
+      '<span class="muted" style="font-size:11px">v' + escapeHtml(p.version || '?') + '</span>' +
+      tag +
+      '<span style="display:flex;gap:6px;margin-left:auto">' + acts + '</span>' +
+      '</div>';
+  });
+  box.innerHTML = h;
+  plazaSig = plazaSignature();
+
+  box.querySelectorAll('[data-plaza-send]').forEach(function(btn){
+    btn.onclick = function(){
+      var id = btn.getAttribute('data-plaza-send');
+      var only = btn.getAttribute('data-import-only') === '1';
+      var sel = box.querySelector('[data-plaza-target="' + id + '"]');
+      var devId = sel ? sel.value : '';
+      if(!only && !devId){ toast('先绑定一台设备'); return; }
+      var label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '处理中…';
+      var step = api('/api/admin/plaza/import', {method:'POST', body: JSON.stringify({id: id})});
+      step.then(function(j){
+        if(only) return { pkg: j.package };
+        return sendCommand(devId, 'plugin_stage', {package_id: j.package.id}).then(function(){ return { pkg: j.package }; });
+      }).then(function(r){
+        toast(only
+          ? '已存到服务端：' + r.pkg.filename
+          : '已排队：设备下次心跳会下载校验，然后在那台机器上点「安装」');
+        btn.disabled = false;
+        btn.textContent = label;
+        refresh();
+        renderPlaza();
+      }).catch(function(e){
+        toast(e.message);
+        btn.disabled = false;
+        btn.textContent = label;
+      });
+    };
+  });
+}
+
+function syncPkgButton(box, pkgId){
+  var btn = box.querySelector('[data-pkg-send="' + pkgId + '"]');
+  if(!btn) return;
+  var sel = box.querySelector('[data-pkg-target="' + pkgId + '"]');
+  var pkg = ((state && state.packages) || []).filter(function(x){ return x.id === pkgId; })[0];
+  var dev = ((state && state.devices) || []).filter(function(x){ return sel && x.id === sel.value; })[0];
+  var installed = null;
+  if(pkg && pkg.plugin_id && dev){
+    (dev.plugins || []).forEach(function(pl){ if(pl.id === pkg.plugin_id) installed = pl.version || ''; });
+  }
+  btn.textContent = (installed !== null && installed !== (pkg.plugin_version || ''))
+    ? '升级到 v' + (pkg.plugin_version || '?')
+    : '发送到设备';
+}
+
 function pluginsHtml(d){
   var list = d.plugins || [];
   if(!list.length) return '<div class="muted">设备还没上报，下次同步后出现</div>';
   var h = '';
   list.forEach(function(p){
     var self = p.id === 'org.cslblog.classsync';
-    var state = p.enabled === true ? '<span class="pill ok">已启用</span>'
+    var statePill = p.enabled === true ? '<span class="pill ok">已启用</span>'
               : p.enabled === false ? '<span class="pill">已禁用</span>'
               : '<span class="pill">状态未知</span>';
     var acts = '';
     if(!p.bundled && !self){
+      // 服务端存了这个插件的新版本，就直接给一个升级入口
+      var up = upgradePkgFor(p.id, p.version || '');
       acts = '<span style="display:flex;gap:6px;margin-left:auto">' +
+        (up
+          ? '<button data-plugin-upgrade="' + escapeHtml(up.id) + '" title="服务端已存 ' +
+              escapeHtml(up.plugin_version) + '">升级到 v' + escapeHtml(up.plugin_version) + '</button>'
+          : '') +
         '<button data-plugin-toggle="' + escapeHtml(p.id) + '" data-plugin-next="' + (p.enabled ? '0' : '1') + '">' +
           (p.enabled === false ? '启用' : '禁用') + '</button>' +
         '<button class="danger" data-plugin-remove="' + escapeHtml(p.id) + '">卸载</button></span>';
@@ -443,7 +617,7 @@ function pluginsHtml(d){
          '<span style="font-size:13px">' + escapeHtml(p.name) + '</span>' +
          '<span class="muted mono" style="font-size:11px">' + escapeHtml(p.id) + '</span>' +
          (p.version ? '<span class="muted" style="font-size:11px">v' + escapeHtml(p.version) + '</span>' : '') +
-         state + acts + '</div>';
+         statePill + acts + '</div>';
   });
   return h;
 }
@@ -568,6 +742,9 @@ function parseSchedule(){
 }
 
 el('modalClose').onclick = function(){ el('mask').classList.remove('show'); refresh().catch(function(){}); };
+el('plazaSearch').onclick = function(){ loadPlaza(el('plazaQ').value); };
+el('plazaQ').addEventListener('keydown', function(e){ if(e.key === 'Enter') loadPlaza(el('plazaQ').value); });
+
 el('pkgUpload').onclick = function(){
   var f = el('pkgFile').files && el('pkgFile').files[0];
   if(!f){ toast('先选一个 .cwplugin 或 .zip'); return; }

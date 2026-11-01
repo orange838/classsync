@@ -2,6 +2,7 @@
 
 import { randomId, randomCode, sha256, nowIso, ok, fail, readCookie, setCookie, clearCookie } from './util.js';
 import { getSetting, setSetting } from './db.js';
+import { readPluginManifest } from './zip.js';
 
 const COOKIE = 'cs_admin';
 
@@ -158,18 +159,25 @@ export async function uploadPackage(request, env) {
   const sha256 = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
   const id = `pkg_${randomId('').slice(0, 10)}`;
 
+  // 从包里的 cwplugin.json 认出版本，后台才能判断是「安装」还是「升级」
+  const manifest = await readPluginManifest(bytes);
+  const pluginId = manifest?.id || null;
+  const pluginVersion = manifest?.version || null;
+
   await env.DB.prepare(
-    'INSERT INTO packages(id, filename, sha256, size, content, created_at) VALUES(?, ?, ?, ?, ?, ?)'
+    `INSERT INTO packages(id, filename, sha256, size, content, created_at, plugin_id, plugin_version, source)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, filename, sha256, bytes.length, content, nowIso())
+    .bind(id, filename, sha256, bytes.length, content, nowIso(), pluginId, pluginVersion, 'upload')
     .run();
 
-  return ok({ id, filename, sha256, size: bytes.length });
+  return ok({ id, filename, sha256, size: bytes.length, plugin_id: pluginId, plugin_version: pluginVersion });
 }
 
 export async function listPackages(env) {
   const rows = await env.DB.prepare(
-    'SELECT id, filename, sha256, size, created_at FROM packages ORDER BY created_at DESC LIMIT 30'
+    `SELECT id, filename, sha256, size, created_at, plugin_id, plugin_version, source
+     FROM packages ORDER BY created_at DESC LIMIT 30`
   ).all();
   return ok({ packages: rows.results || [] });
 }
@@ -202,7 +210,8 @@ export async function state(env) {
   ).all();
   const { results: settings } = await env.DB.prepare('SELECT key, value FROM settings').all();
   const { results: packagesList } = await env.DB.prepare(
-    'SELECT id, filename, sha256, size, created_at FROM packages ORDER BY created_at DESC LIMIT 30'
+    `SELECT id, filename, sha256, size, created_at, plugin_id, plugin_version, source
+     FROM packages ORDER BY created_at DESC LIMIT 30`
   ).all();
 
   const draftMap = Object.fromEntries((drafts || []).map((d) => [d.device_id, d.updated_at]));

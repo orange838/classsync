@@ -4,6 +4,7 @@ import {
   makePairingCode, pushCommand, updateSettings, deleteDevice,
   uploadPackage, listPackages, deletePackage,
 } from './admin.js';
+import { browsePlaza, importFromPlaza } from './plaza.js';
 import { fail } from './util.js';
 import { ADMIN_HTML } from './adminHtml.js';
 
@@ -50,6 +51,8 @@ export default {
         if (path === '/api/admin/logout-all' && method === 'POST') return await logoutAll(env);
         if (path === '/api/admin/package' && method === 'POST') return await uploadPackage(request, env);
         if (path === '/api/admin/package' && method === 'GET') return await listPackages(env);
+        if (path === '/api/admin/plaza' && method === 'GET') return await browsePlaza(request);
+        if (path === '/api/admin/plaza/import' && method === 'POST') return await importFromPlaza(request, env);
         if (path.startsWith('/api/admin/package/') && method === 'DELETE') {
           return await deletePackage(env, path.slice('/api/admin/package/'.length));
         }

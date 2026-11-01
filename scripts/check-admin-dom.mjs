@@ -39,6 +39,7 @@ const sampleState = {
       pending_install: '',
       plugins: [
         { id: 'org.cslblog.classsync', name: '课表同步', version: '0.1.0', enabled: true, bundled: false, has_ui: true },
+        { id: 'com.rinlit.countdowndays', name: '倒计时日', version: '1.1.0', enabled: true, bundled: false, has_ui: true },
         { id: 'builtin.demo', name: '示例', version: '1.0.0', enabled: false, bundled: true, has_ui: false }
       ]
     }
@@ -47,7 +48,11 @@ const sampleState = {
     { type: 'sync_now', device_id: 'dev-1', status: 'done', created_at: new Date().toISOString(), result: 'ok' }
   ],
   packages: [
-    { id: 'pkg-1', filename: 'demo.zip', size: 20480, sha256: 'a'.repeat(64), created_at: new Date().toISOString() }
+    {
+      id: 'pkg-1', filename: '倒计时日-1.2.0.cwplugin', size: 20480, sha256: 'a'.repeat(64),
+      created_at: new Date().toISOString(),
+      plugin_id: 'com.rinlit.countdowndays', plugin_version: '1.2.0', source: 'plaza'
+    }
   ],
   settings: { poll_interval: '30' },
   online_grace_seconds: 120
@@ -69,6 +74,22 @@ const dom = new JSDOM(ADMIN_HTML, {
       const method = (opts && opts.method) || 'GET';
       calls.push(method + ' ' + url);
       if (url === '/api/admin/login') return response(200, { ok: true });
+      if (url.indexOf('/api/admin/plaza/import') === 0) {
+        return response(200, {
+          package: { id: 'pkg-2', filename: '倒计时日-1.3.0.cwplugin', plugin_version: '1.3.0', plugin_id: 'com.rinlit.countdowndays' },
+          reused: false
+        });
+      }
+      if (url.indexOf('/api/admin/plaza') === 0) {
+        return response(200, {
+          items: [
+            { id: 'com.rinlit.countdowndays', name: '倒计时日', version: '1.3.0', author: 'rinlit' },
+            { id: 'org.cslblog.classsync', name: '课表同步', version: '0.1.0', author: 'orange838' }
+          ],
+          total: 2
+        });
+      }
+      if (url === '/api/admin/command') return response(200, { ok: true });
       if (url === '/api/admin/state') {
         // 第一次取 state 之前没登录，返回 401
         const loggedIn = calls.includes('POST /api/admin/login');
@@ -119,6 +140,7 @@ check('卡片含操作按钮', !!devices.querySelector('[data-act="edit"]'));
 check('卡片含插件列表', /课表同步/.test(devices.textContent));
 check('卡片含便携版标识', /便携版/.test(devices.textContent));
 check('卡片含待安装提示位', !/待本机确认安装/.test(devices.textContent), '不该出现空提示');
+check('有更新版本时出现升级按钮', !!devices.querySelector('[data-plugin-upgrade]'));
 
 console.log('心跳实时刷新：');
 check('心跳带具体秒数', /最后心跳 \d+ 秒前/.test(devices.textContent),
@@ -138,7 +160,28 @@ check('状态点同步变灰', dot && dot.className === 'dot off', '实际：' +
 
 const pkgList = doc.getElementById('pkgList');
 console.log('插件包列表：');
-check('渲染出插件包行', /demo\.zip/.test(pkgList.textContent));
+check('渲染出插件包行', /countdowndays/.test(pkgList.textContent) || /倒计时日/.test(pkgList.textContent));
+check('显示包内版本号', /v1\.2\.0/.test(pkgList.textContent), '实际：' + pkgList.textContent.replace(/\s+/g, ' '));
+check('显示广场来源', /广场/.test(pkgList.textContent));
+check('发送按钮变成升级', /升级到 v1\.2\.0/.test(pkgList.textContent),
+  '实际：' + pkgList.textContent.replace(/\s+/g, ' '));
+
+console.log('插件广场：');
+doc.getElementById('plazaSearch').click();
+await wait(200);
+const plazaList = doc.getElementById('plazaList');
+check('拉到广场列表', /倒计时日/.test(plazaList.textContent),
+  '实际：' + plazaList.textContent.replace(/\s+/g, ' ').slice(0, 100));
+check('已装 1.1.0 且广场 1.3.0 时提示升级', /1\.1\.0 → 1\.3\.0/.test(plazaList.textContent),
+  '实际：' + plazaList.textContent.replace(/\s+/g, ' ').slice(0, 120));
+const sendBtn = plazaList.querySelector('[data-plaza-send]');
+check('广场行有推送按钮', !!sendBtn);
+sendBtn.click();
+await wait(250);
+check('推送走了导入接口', calls.some(function(c){ return c.indexOf('POST /api/admin/plaza/import') === 0; }),
+  '实际调用：' + calls.join(' , '));
+check('推送走了下发指令', calls.some(function(c){ return c.indexOf('POST /api/admin/command') === 0; }),
+  '实际调用：' + calls.join(' , '));
 
 const cmdList = doc.getElementById('cmdList');
 check('渲染出指令记录', /sync_now/.test(cmdList.textContent));
