@@ -11,6 +11,7 @@
     "db:init:local": "wrangler d1 execute classsync --local --file=./migrations/0001_init.sql"
   },
   "devDependencies": {
+    "jsdom": "^30.1.3",
     "wrangler": "^4.0.0"
   }
 }

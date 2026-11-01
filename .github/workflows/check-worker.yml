@@ -2,7 +2,9 @@ name: Check Worker
 
 # 后台页面是「模板字符串里套 HTML、HTML 里套 <script>」的结构，
 # 源文件语法正确不代表求值后依然正确（模板字符串会再解析一层转义）。
-# 这里对求值后的脚本做一次编译校验，避免 SyntaxError 直接进线上。
+# 这里对求值后的脚本做编译校验，并用 jsdom 真跑一遍登录->渲染。
+# 后者能拦住「语法没问题但点不动」的 bug（例如字符串拼接少一个 +，
+# 导致 querySelector 返回 null、onclick 赋值抛错、被 catch 静默吞掉）。
 
 on:
   push:
@@ -20,8 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: 安装 worker 依赖
+        working-directory: worker
+        run: npm ci --no-audit --no-fund
+
       - name: 校验后台内联脚本
         run: node scripts/check-admin-html.mjs
+
+      - name: 后台页面 DOM 冒烟测试
+        run: node scripts/check-admin-dom.mjs
 
       - name: 校验 worker 各模块语法
         run: |

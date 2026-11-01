@@ -166,7 +166,11 @@ function api(path, opts){
   opts.credentials = 'same-origin';
   return fetch(path, opts).then(function(r){
     return r.json().catch(function(){ return {}; }).then(function(j){
-      if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      if(!r.ok){
+        var err = new Error(j.error || ('HTTP ' + r.status));
+        err.status = r.status;
+        throw err;
+      }
       return j;
     });
   });
@@ -215,14 +219,22 @@ function boot(){
       api('/api/admin/logout-all', {method:'POST'}).then(function(){ location.reload(); })
         .catch(function(e){ toast(e.message); });
     };
-    render();
+    try { render(); } catch(e){ reportRenderError(e); }
     scheduleAutoRefresh();
     setAutoPaused(!!document.hidden);
-  }).catch(function(){
+  }).catch(function(e){
     el('login').style.display = 'block';
     el('main').style.display = 'none';
     el('hdr-actions').innerHTML = '';
+    // 未登录是正常状态，不弹提示；其他失败才提示
+    if(e && e.message && e.status !== 401) toast('加载失败：' + e.message);
   });
+}
+
+// 渲染异常以前会被静默吞掉，界面看起来就像「点了没反应」，这里统一透出
+function reportRenderError(e){
+  console.error('[classsync] render failed:', e);
+  toast('界面渲染出错：' + ((e && e.message) || e) + '（已记到浏览器控制台）');
 }
 
 function render(){
@@ -290,7 +302,7 @@ function deviceCard(d){
     '<div class="muted" style="margin-top:4px">' +
       '<span class="dot ' + (d.online?'on':'off') + '"></span>' +
       '<span title="' + escapeHtml(d.last_seen ? new Date(d.last_seen).toLocaleString() : '从未上报') + '">' +
-      (d.online ? '在线' : '离线') + ' · 最后心跳 ' + relTime(d.last_seen) + '</span>'
+      (d.online ? '在线' : '离线') + ' · 最后心跳 ' + relTime(d.last_seen) + '</span>' +
     '</div>' +
     '<hr>' +
     '<div class="row">' +
@@ -455,7 +467,9 @@ function refresh(){
     state = j;
     // 编辑中不重绘，避免吞掉未保存的文本；关弹窗后会再刷一次
     if(isEditing()) return;
-    render();
+    try { render(); } catch(e){ reportRenderError(e); }
+  }).catch(function(e){
+    console.error('[classsync] refresh failed:', e);
   });
 }
 
