@@ -90,7 +90,9 @@ export async function getPackageContent(env, packageId) {
 export async function dropPackageContent(env, packageId) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM package_chunks WHERE package_id = ?').bind(packageId),
-    env.DB.prepare('UPDATE packages SET content = NULL WHERE id = ?').bind(packageId),
+    // content 是 NOT NULL（SQLite 无法删除约束），这里只能置空串；
+    // 置 NULL 会让整个 batch 回滚，分片反而删不掉。
+    env.DB.prepare("UPDATE packages SET content = '' WHERE id = ?").bind(packageId),
   ]);
 }
 

@@ -168,8 +168,11 @@ export async function uploadPackage(request, env) {
   const pluginVersion = manifest?.version || null;
 
   await env.DB.prepare(
+    // content 列在 0003 里是 NOT NULL，SQLite 又删不掉这个约束，
+    // 所以这里必须写空串：包体早就不存这一列了（0005 拆分到 package_chunks），
+    // 写 NULL 会直接 SQLITE_CONSTRAINT_NOTNULL。
     `INSERT INTO packages(id, filename, sha256, size, content, created_at, plugin_id, plugin_version, source)
-     VALUES(?, ?, ?, ?, NULL, ?, ?, ?, ?)`
+     VALUES(?, ?, ?, ?, '', ?, ?, ?, ?)`
   )
     .bind(id, filename, sha256, bytes.length, nowIso(), pluginId, pluginVersion, 'upload')
     .run();
