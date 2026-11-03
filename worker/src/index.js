@@ -5,6 +5,7 @@ import {
   uploadPackage, listPackages, deletePackage,
 } from './admin.js';
 import { browsePlaza, importFromPlaza } from './plaza.js';
+import { releases } from './cw2.js';
 import { fail } from './util.js';
 import { ADMIN_HTML } from './adminHtml.js';
 
@@ -32,6 +33,9 @@ export default {
       if (path.startsWith('/api/device/package/') && method === 'GET') {
         return cors(await downloadPackage(request, env, path.slice('/api/device/package/'.length)));
       }
+
+      // ---- CW2 更新源（拦住 Class Widgets 2 的自动/手动更新）----
+      if (path === '/cw2/releases.json' && method === 'GET') return releases(request);
 
       // ---- 后台 ----
       if (path === '/' || path === '/admin') {

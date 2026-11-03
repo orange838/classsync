@@ -76,7 +76,9 @@ export async function pairDevice(request, env) {
   if (row.used_at) return fail('配对码已被使用', 409);
   if (Date.parse(row.expires_at) <= Date.now()) return fail('配对码已过期', 410);
 
-  const maxDevices = Number(await getSetting(env, 'max_devices', '2'));
+  // 上限默认 3 台；老库里若还留着 max_devices=2，也按 3 兜底，避免改了默认值不生效
+  const rawLimit = Number(await getSetting(env, 'max_devices', '3'));
+  const maxDevices = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.max(3, rawLimit) : 3;
   const { results } = await env.DB.prepare('SELECT COUNT(*) AS n FROM devices').all();
   const count = results?.[0]?.n ?? 0;
   if (count >= maxDevices) return fail(`最多只能绑定 ${maxDevices} 台设备`, 409);
