@@ -55,7 +55,14 @@ const sampleState = {
     }
   ],
   settings: { poll_interval: '30' },
-  online_grace_seconds: 120
+  online_grace_seconds: 120,
+  poll_advice: {
+    device_count: 1,
+    recommended: 30,
+    est_requests_per_day: 2880,
+    daily_budget: 40000,
+    notes: '1 台设备 × 每 30 秒一次 ≈ 2880 请求/天，占轮询预算 7%',
+  },
 };
 
 const calls = [];
@@ -185,6 +192,21 @@ check('推送走了下发指令', calls.some(function(c){ return c.indexOf('POST
 
 const cmdList = doc.getElementById('cmdList');
 check('渲染出指令记录', /sync_now/.test(cmdList.textContent));
+
+const pollHint = doc.getElementById('pollHint');
+check('按设备数给出推荐间隔', /推荐 30 秒/.test(pollHint.textContent),
+  '实际：' + pollHint.textContent);
+check('推荐按钮带上推荐值', /用推荐值 30 秒/.test(doc.getElementById('useAdvice').textContent),
+  '实际：' + doc.getElementById('useAdvice').textContent);
+doc.getElementById('useAdvice').click();
+await wait(250);
+check('点用推荐值会写进输入框', doc.getElementById('pollInput').value === '30',
+  '实际：' + doc.getElementById('pollInput').value);
+check('点用推荐值会保存设置',
+  calls.some(function(c){ return c.indexOf('POST /api/admin/settings') === 0; }),
+  '实际调用：' + calls.join(' , '));
+check('保存后提示已按推荐设置', /推荐/.test(doc.getElementById('toast').textContent),
+  '实际：' + doc.getElementById('toast').textContent);
 
 console.log('运行期错误：');
 check('无脚本运行时错误', errors.length === 0, errors.join(' | '));

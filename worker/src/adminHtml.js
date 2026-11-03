@@ -83,6 +83,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
     <div style="display:flex;gap:10px;align-items:center">
       <input id="pollInput" style="max-width:160px" />
       <button id="savePoll">保存</button>
+      <button id="useAdvice" title="按当前绑定的设备数自动算一个间隔">用推荐值</button>
       <span class="muted" id="pollHint">建议 60–300；最小 15 秒。越小越实时，越费请求</span>
     </div>
   </div>
@@ -272,6 +273,11 @@ function render(){
   if(state.online_grace_seconds && el('pollHint')){
     el('pollHint').textContent = '建议 60–300；最小 15 秒。超过 ' +
       state.online_grace_seconds + ' 秒没心跳算离线（自动跟随间隔×2）';
+  }
+  if(state.poll_advice && el('pollHint')){
+    var ad = state.poll_advice;
+    el('pollHint').textContent = '推荐 ' + ad.recommended + ' 秒 · ' + ad.notes;
+    if(el('useAdvice')) el('useAdvice').textContent = '用推荐值 ' + ad.recommended + ' 秒';
   }
 
   var cmds = state.commands || [];
@@ -872,6 +878,14 @@ el('pairBtn').onclick = function(){
 el('savePoll').onclick = function(){
   api('/api/admin/settings', {method:'POST', body: JSON.stringify({poll_interval: el('pollInput').value})})
     .then(function(){ toast('已保存'); refresh(); })
+    .catch(function(e){ toast(e.message); });
+};
+el('useAdvice').onclick = function(){
+  if(!state || !state.poll_advice) return toast('还没拿到设备数量，稍等一下再点');
+  var v = state.poll_advice.recommended;
+  el('pollInput').value = String(v);
+  api('/api/admin/settings', {method:'POST', body: JSON.stringify({poll_interval: v})})
+    .then(function(){ toast('已按推荐设为 ' + v + ' 秒'); refresh(); })
     .catch(function(e){ toast(e.message); });
 };
 el('refreshBtn').onclick = function(){ refresh().then(function(){ toast('已刷新'); }); };

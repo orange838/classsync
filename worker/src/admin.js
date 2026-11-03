@@ -8,6 +8,28 @@ import {
 } from './packages.js';
 
 const COOKIE = 'cs_admin';
+// ---------------------------------------------------------------- 轮询间隔推荐
+// 免费版 Workers 每天 10 万请求，这个号和别的项目共用，轮询最多分 4 万。
+// 每台设备每天的心跳数 = 86400 / 间隔，设备越多间隔就得越大，否则一天就烧穿额度。
+const POLL_DAILY_BUDGET = 40000;
+const POLL_STEPS = [15, 20, 30, 45, 60, 90, 120, 180, 300];
+
+/** 按当前绑定设备数推荐轮询间隔（秒），并给出预估日请求量 */
+export function pollAdvice(deviceCount) {
+  const count = Math.max(1, Number(deviceCount) || 1);
+  // 最少给 30 秒：几台设备时实时性够用，也不至于白烧额度
+  const need = Math.max(30, Math.ceil((86400 * count) / POLL_DAILY_BUDGET));
+  const interval = POLL_STEPS.find((s) => s >= need) || Math.ceil(need / 300) * 300;
+  const perDay = Math.ceil(86400 / interval) * count;
+  return {
+    device_count: count,
+    recommended: interval,
+    est_requests_per_day: perDay,
+    daily_budget: POLL_DAILY_BUDGET,
+    notes: `${count} 台设备 × 每 ${interval} 秒一次 ≈ ${perDay} 请求/天，占轮询预算 ${Math.round((perDay / POLL_DAILY_BUDGET) * 100)}%`,
+  };
+}
+
 
 // 登录限流：同一 IP 连续失败 5 次，锁 15 分钟
 const MAX_FAILS = 5;
@@ -269,6 +291,7 @@ export async function state(env) {
     commands: commands || [],
     settings: settingMap,
     online_grace_seconds: graceSeconds,
+    poll_advice: pollAdvice((devices || []).length),
   });
 }
 
