@@ -491,14 +491,32 @@ function installedVersionOf(pluginId){
   return '';
 }
 
-// 服务端现有包里，有没有这个插件的新版本
+// 版本号比较：a>b 返 1，a<b 返 -1，相等/无法解析返 0（逐段按数字比，短的前面补 0）
+function verCmp(a, b){
+  if(!a || !b) return 0;
+  var pa = String(a).replace(/^v/i,'').split('.').map(function(x){ return parseInt(x,10) || 0; });
+  var pb = String(b).replace(/^v/i,'').split('.').map(function(x){ return parseInt(x,10) || 0; });
+  var n = Math.max(pa.length, pb.length);
+  for(var i=0;i<n;i++){
+    var x = pa[i]||0, y = pb[i]||0;
+    if(x>y) return 1;
+    if(x<y) return -1;
+  }
+  return 0;
+}
+
+// 服务端现有包里，有没有这个插件的新版本（必须是真更新，不能是降级）
 function upgradePkgFor(pluginId, currentVersion){
   var list = (state && state.packages) || [];
+  var fallback = null;
   for(var i=0;i<list.length;i++){
     var p = list[i];
-    if(p.plugin_id === pluginId && p.plugin_version && p.plugin_version !== currentVersion) return p;
+    if(p.plugin_id !== pluginId || !p.plugin_version) continue;
+    var c = verCmp(p.plugin_version, currentVersion);
+    if(c > 0) return p;                                      // 真正的新版本
+    if(c === 0 && !currentVersion) fallback = fallback || p; // 设备没上报版本时退回旧行为
   }
-  return null;
+  return fallback;
 }
 
 function loadPlaza(q){
@@ -528,19 +546,22 @@ function renderPlaza(){
   var h = '';
   plazaItems.forEach(function(p){
     var installed = installedVersionOf(p.id);
+    var vcmp = verCmp(p.version, installed);
     var tag;
     if(!installed){
       tag = '<span class="pill">未安装</span>';
-    } else if(installed === p.version){
+    } else if(vcmp === 0){
       tag = '<span class="pill ok">已是最新</span>';
-    } else {
+    } else if(vcmp > 0){
       tag = '<span class="pill warn">' + escapeHtml(installed) + ' → ' + escapeHtml(p.version) + '</span>';
+    } else {
+      tag = '<span class="pill ok">已是最新（本地 v' + escapeHtml(installed) + '）</span>';
     }
     var acts = '';
     if(devs.length){
       acts = '<select data-plaza-target="' + escapeHtml(p.id) + '" style="max-width:150px">' + devSel + '</select>' +
         '<button data-plaza-send="' + escapeHtml(p.id) + '">' +
-        (installed && installed !== p.version ? '升级' : '推到设备') + '</button>';
+        (installed && verCmp(p.version, installed) > 0 ? '升级' : '推到设备') + '</button>';
     } else {
       acts = '<button data-plaza-send="' + escapeHtml(p.id) + '" data-import-only="1">导到服务端</button>';
     }
@@ -596,7 +617,7 @@ function syncPkgButton(box, pkgId){
   if(pkg && pkg.plugin_id && dev){
     (dev.plugins || []).forEach(function(pl){ if(pl.id === pkg.plugin_id) installed = pl.version || ''; });
   }
-  btn.textContent = (installed !== null && installed !== (pkg.plugin_version || ''))
+  btn.textContent = (installed !== null && verCmp(pkg.plugin_version || '', installed) > 0)
     ? '升级到 v' + (pkg.plugin_version || '?')
     : '发送到设备';
 }

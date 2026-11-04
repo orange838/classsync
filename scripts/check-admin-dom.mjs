@@ -40,7 +40,8 @@ const sampleState = {
       plugins: [
         { id: 'org.cslblog.classsync', name: '课表同步', version: '0.1.0', enabled: true, bundled: false, has_ui: true },
         { id: 'com.rinlit.countdowndays', name: '倒计时日', version: '1.1.0', enabled: true, bundled: false, has_ui: true },
-        { id: 'builtin.demo', name: '示例', version: '1.0.0', enabled: false, bundled: true, has_ui: false }
+        { id: 'builtin.demo', name: '示例', version: '1.0.0', enabled: false, bundled: true, has_ui: false },
+        { id: 'org.cslblog.volumerabbit', name: '早读萝卜', version: '0.2.4', enabled: true, bundled: false, has_ui: true }
       ]
     }
   ],
@@ -52,6 +53,11 @@ const sampleState = {
       id: 'pkg-1', filename: '倒计时日-1.2.0.cwplugin', size: 20480, sha256: 'a'.repeat(64),
       created_at: new Date().toISOString(),
       plugin_id: 'com.rinlit.countdowndays', plugin_version: '1.2.0', source: 'plaza'
+    },
+    {
+      id: 'pkg-old', filename: '早读萝卜-0.2.3.cwplugin', size: 20480, sha256: 'b'.repeat(64),
+      created_at: new Date().toISOString(),
+      plugin_id: 'org.cslblog.volumerabbit', plugin_version: '0.2.3', source: 'plaza'
     }
   ],
   settings: { poll_interval: '30' },
@@ -172,6 +178,17 @@ check('显示包内版本号', /v1\.2\.0/.test(pkgList.textContent), '实际：'
 check('显示广场来源', /广场/.test(pkgList.textContent));
 check('发送按钮变成升级', /升级到 v1\.2\.0/.test(pkgList.textContent),
   '实际：' + pkgList.textContent.replace(/\s+/g, ' '));
+
+console.log('降级保护：');
+check('已装 0.2.4 时旧包 0.2.3 不显示升级按钮',
+  !pkgList.textContent.includes('升级到 v0.2.3'),
+  '实际：' + pkgList.textContent.replace(/\s+/g, ' ').slice(0, 240));
+check('设备插件行不出现 0.2.3 升级入口',
+  !devices.textContent.includes('升级到 v0.2.3'),
+  '实际：' + devices.textContent.replace(/\s+/g, ' ').slice(0, 240));
+check('旧包仍可正常“发送到设备”',
+  (pkgList.textContent.match(/发送到设备/g) || []).length >= 1,
+  '实际：' + pkgList.textContent.replace(/\s+/g, ' ').slice(0, 240));
 
 console.log('插件广场：');
 doc.getElementById('plazaSearch').click();
