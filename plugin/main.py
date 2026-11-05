@@ -561,6 +561,17 @@ class Plugin(CW2Plugin):
                     acks.append({"id": command_id, "ok": ok, "result": message[:200]})
                     if ok:
                         immediate = True
+                elif command_type == "show_banner":
+                    cmd_payload = command.get("payload") or {}
+                    text = str(cmd_payload.get("text") or "").strip()
+                    if not text:
+                        raise ValueError("横幅文字为空")
+                    try:
+                        duration = int(cmd_payload.get("duration") or 0)
+                    except (TypeError, ValueError):
+                        duration = 0
+                    ok, message = self._show_banner(text, max(0, duration))
+                    acks.append({"id": command_id, "ok": ok, "result": message[:200]})
                 elif command_type == "restart_app":
                     acks.append({"id": command_id, "ok": True, "result": "即将重启"})
                     self._queue_restart()
@@ -582,6 +593,30 @@ class Plugin(CW2Plugin):
                 merged[str(ack["id"])] = ack
             self._config.pending_acks = list(merged.values())[-50:]
         # immediate 时由 _on_sync_finished 末尾的 interval=2 触发下一次同步
+
+    def _show_banner(self, text: str, duration: int) -> tuple[bool, str]:
+        """远程横幅：只走「更好的自动化」的顶部横幅模式，不做全屏、也不降级成通知。
+
+        两个插件是独立仓库，这里用插件管理器按 id 取对方实例，拿到 playBanner 就调用；
+        对方没装或版本太旧时直接回失败，让后台能看到原因。
+        """
+        try:
+            plugins = self.api._app.plugin_manager._plugins
+        except Exception as exc:                       # noqa: BLE001
+            return False, f"取插件列表失败：{exc}"
+        target = plugins.get("org.cslblog.betterautomations") if hasattr(plugins, "get") else None
+        if target is None:
+            return False, "本机没装（或没启用）「更好的自动化」"
+        if not hasattr(target, "playBanner"):
+            return False, "「更好的自动化」版本过旧，缺 playBanner 接口"
+        try:
+            if target.playBanner(text, duration):
+                logger.info(f"[ClassSync] 远程横幅已显示：{len(text)} 字，{duration}s")
+                return True, "横幅已显示"
+            return False, "横幅未能显示"
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning(f"[ClassSync] 调用横幅失败: {exc}")
+            return False, f"调用横幅失败：{exc}"
 
     def _read_current_schedule_dict(self) -> Optional[dict]:
         """读“用户自己的课表”，返回 (课表名, 数据)；失败返回 None。

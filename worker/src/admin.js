@@ -45,6 +45,7 @@ export const ALLOWED_COMMANDS = new Set([
   'plugin_set_enabled',
   'plugin_uninstall',
   'plugin_stage',
+  'show_banner',
 ]);
 
 /** 单包上限：包体已改为分块存，不再受 D1 单行限制 */
@@ -371,6 +372,14 @@ export async function pushCommand(request, env) {
   }
 
   // 插件相关指令的参数校验
+  // 远程横幅：只显示一条顶部横幅，文字必填、时长限 0~24h（0 = 一直显示）
+  if (type === 'show_banner') {
+    const text = String(body.payload?.text || '').trim();
+    if (!text) return fail('缺少横幅文字');
+    const duration = Math.min(Math.max(Number(body.payload?.duration || 0) || 0, 0), 86400);
+    body.payload = { text: text.slice(0, 500), duration };
+  }
+
   if (type === 'plugin_set_enabled' || type === 'plugin_uninstall') {
     const pluginId = String(body.payload?.id || '').trim();
     if (!pluginId) return fail('缺少插件 id');

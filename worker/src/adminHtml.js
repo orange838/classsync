@@ -155,8 +155,15 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
       <option value="upload_schedule">上传本机课表到后台</option>
       <option value="switch_portable">切换便携模式</option>
       <option value="restart_app">重启 Class Widgets</option>
+      <option value="show_banner">推送横幅（顶部横幅）</option>
     </select>
     <div class="muted" style="margin-top:10px" id="cmdHint"></div>
+    <div id="cmdBanner" style="display:none;margin-top:12px">
+      <label>横幅文字</label>
+      <input id="bannerText" maxlength="200" placeholder="例如：下午第三节调整到大礼堂" />
+      <label style="margin-top:8px">显示时长（秒，0 = 一直显示到设备上手动关掉）</label>
+      <input id="bannerDur" type="number" min="0" max="86400" value="0" style="max-width:160px" />
+    </div>
     <div style="margin-top:16px"><button class="primary" id="cmdSend" style="width:100%">发送</button></div>
   </div>
 </div>
@@ -862,9 +869,11 @@ function updateHint(){
     switch_portable: (currentDevice && currentDevice.data_mode === 'portable')
       ? '当前是便携版（数据在程序目录）。切换会把数据复制到用户目录（%LOCALAPPDATA% 下），然后重启程序；原数据不会被删除。'
       : '当前是用户目录（数据在 C 盘）。切换会把数据复制到程序目录下的 data 文件夹，然后重启程序；原数据不会被删除。',
-    restart_app: '直接重启 Class Widgets 2。'
+    restart_app: '直接重启 Class Widgets 2。',
+    show_banner: '在设备屏幕上方拉一条横幅（只占上方一条，不挡桌面，不进任务栏）。文字必填；时长 0 = 一直显示，要在设备上右键退出。设备需装「更好的自动化」插件。'
   };
   el('cmdHint').textContent = hints[t] || '';
+  el('cmdBanner').style.display = (t === 'show_banner') ? 'block' : 'none';
 }
 function sendCommand(deviceId, type, payload){
   return api('/api/admin/command', {
@@ -873,7 +882,14 @@ function sendCommand(deviceId, type, payload){
   });
 }
 el('cmdSend').onclick = function(){
-  sendCommand(currentDevice.id, el('cmdType').value)
+  var type = el('cmdType').value;
+  var payload = {};
+  if(type === 'show_banner'){
+    var text = (el('bannerText').value || '').trim();
+    if(!text){ toast('请填写横幅文字'); return; }
+    payload = { text: text, duration: Math.max(0, Number(el('bannerDur').value) || 0) };
+  }
+  sendCommand(currentDevice.id, type, payload)
     .then(function(){ toast('指令已排队，等设备下次心跳（最长一个轮询间隔）'); el('cmdMask').classList.remove('show'); refresh(); })
     .catch(function(e){ toast(e.message); });
 };

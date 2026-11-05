@@ -72,6 +72,7 @@ const sampleState = {
 };
 
 const calls = [];
+const reqBodies = [];
 const response = (status, body) => ({
   ok: status >= 200 && status < 300,
   status,
@@ -86,6 +87,7 @@ const dom = new JSDOM(ADMIN_HTML, {
     window.fetch = async (url, opts) => {
       const method = (opts && opts.method) || 'GET';
       calls.push(method + ' ' + url);
+      reqBodies.push({ url: url, body: (opts && opts.body) || '' });
       if (url === '/api/admin/login') return response(200, { ok: true });
       if (url.indexOf('/api/admin/plaza/import') === 0) {
         return response(200, {
@@ -224,6 +226,43 @@ check('点用推荐值会保存设置',
   '实际调用：' + calls.join(' , '));
 check('保存后提示已按推荐设置', /推荐/.test(doc.getElementById('toast').textContent),
   '实际：' + doc.getElementById('toast').textContent);
+
+console.log('远程横幅（show_banner）指令：');
+doc.querySelector('[data-act="cmd"]').click();
+await wait(60);
+const cmdType = doc.getElementById('cmdType');
+check('设备指令弹窗可打开', doc.getElementById('cmdMask').classList.contains('show'),
+  '实际 ' + doc.getElementById('cmdMask').className);
+cmdType.value = 'show_banner';
+cmdType.onchange();
+check('选中横幅后出现文字输入区', doc.getElementById('cmdBanner').style.display === 'block',
+  '实际 ' + JSON.stringify(doc.getElementById('cmdBanner').style.display));
+check('横幅提示文案到位', /只占上方一条/.test(doc.getElementById('cmdHint').textContent),
+  '实际：' + doc.getElementById('cmdHint').textContent);
+
+const beforeBanner = reqBodies.filter(function(r){ return r.url === '/api/admin/command'; }).length;
+doc.getElementById('bannerText').value = '   ';
+doc.getElementById('cmdSend').click();
+await wait(60);
+check('文字为空时不发指令',
+  reqBodies.filter(function(r){ return r.url === '/api/admin/command'; }).length === beforeBanner,
+  '实际发了 ' + (reqBodies.filter(function(r){ return r.url === '/api/admin/command'; }).length - beforeBanner) + ' 次');
+check('文字为空时给出提示', /请填写横幅文字/.test(doc.getElementById('toast').textContent),
+  '实际：' + doc.getElementById('toast').textContent);
+
+doc.getElementById('bannerText').value = '下午第三节调整到大礼堂';
+doc.getElementById('bannerDur').value = '30';
+doc.getElementById('cmdSend').click();
+await wait(200);
+const bannerReq = reqBodies.filter(function(r){ return r.url === '/api/admin/command'; }).pop();
+check('填好文字会下发指令', !!bannerReq && reqBodies.filter(function(r){ return r.url === '/api/admin/command'; }).length > beforeBanner);
+let bannerBody = null;
+try { bannerBody = JSON.parse(bannerReq.body); } catch (e) { bannerBody = null; }
+check('指令类型是 show_banner', bannerBody && bannerBody.type === 'show_banner',
+  '实际：' + (bannerReq && bannerReq.body));
+check('payload 带上文字与时长',
+  bannerBody && bannerBody.payload && bannerBody.payload.text === '下午第三节调整到大礼堂' && bannerBody.payload.duration === 30,
+  '实际：' + JSON.stringify(bannerBody && bannerBody.payload));
 
 console.log('运行期错误：');
 check('无脚本运行时错误', errors.length === 0, errors.join(' | '));
