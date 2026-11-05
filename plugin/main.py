@@ -609,6 +609,17 @@ class Plugin(CW2Plugin):
             return False, "本机没装（或没启用）「更好的自动化」"
         if not hasattr(target, "playBanner"):
             return False, "「更好的自动化」版本过旧，缺 playBanner 接口"
+        # 上课 / 活动期间一律不准推送：本机先判一次，再问对方插件确认一次
+        if self._is_in_class():
+            logger.info("[ClassSync] 上课中，拒绝远程横幅")
+            return False, "正在上课，已拒绝推送横幅"
+        try:
+            block = target.bannerBlockReason() if hasattr(target, "bannerBlockReason") else ""
+        except Exception:                              # noqa: BLE001
+            block = ""
+        if block:
+            logger.info(f"[ClassSync] 拒绝远程横幅：{block}")
+            return False, str(block)[:200]
         try:
             if target.playBanner(text, duration):
                 logger.info(f"[ClassSync] 远程横幅已显示：{len(text)} 字，{duration}s")

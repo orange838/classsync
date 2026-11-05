@@ -376,6 +376,13 @@ export async function pushCommand(request, env) {
   if (type === 'show_banner') {
     const text = String(body.payload?.text || '').trim();
     if (!text) return fail('缺少横幅文字');
+    // 上课 / 活动期间一律不准推送：先用设备上次上报的状态挡一道，
+    // 真正兜底的判定在设备端（主程序状态以那边为准）
+    const dev = await env.DB.prepare('SELECT status FROM devices WHERE id = ?')
+      .bind(body.device_id).first();
+    if (dev && (dev.status === 'class' || dev.status === 'activity')) {
+      return fail('设备正在上课，拒绝推送横幅（下课后再说）');
+    }
     const duration = Math.min(Math.max(Number(body.payload?.duration || 0) || 0, 0), 86400);
     body.payload = { text: text.slice(0, 500), duration };
   }
