@@ -594,8 +594,13 @@ class Plugin(CW2Plugin):
             self._config.pending_acks = list(merged.values())[-50:]
         # immediate 时由 _on_sync_finished 末尾的 interval=2 触发下一次同步
 
+    # 横幅由「自动化」插件绘制。3.1.0 起它的 ID 从
+    # org.cslblog.betterautomations 回归 com.kryon.automations，
+    # 这里两个都试，先新的后旧的，兼容没升级的机器。
+    BANNER_PLUGIN_IDS = ("com.kryon.automations", "org.cslblog.betterautomations")
+
     def _show_banner(self, text: str, duration: int) -> tuple[bool, str]:
-        """远程横幅：只走「更好的自动化」的顶部横幅模式，不做全屏、也不降级成通知。
+        """远程横幅：只走「自动化」的顶部横幅模式，不做全屏、也不降级成通知。
 
         两个插件是独立仓库，这里用插件管理器按 id 取对方实例，拿到 playBanner 就调用；
         对方没装或版本太旧时直接回失败，让后台能看到原因。
@@ -604,11 +609,16 @@ class Plugin(CW2Plugin):
             plugins = self.api._app.plugin_manager._plugins
         except Exception as exc:                       # noqa: BLE001
             return False, f"取插件列表失败：{exc}"
-        target = plugins.get("org.cslblog.betterautomations") if hasattr(plugins, "get") else None
+        target = None
+        if hasattr(plugins, "get"):
+            for plugin_id in self.BANNER_PLUGIN_IDS:
+                target = plugins.get(plugin_id)
+                if target is not None:
+                    break
         if target is None:
-            return False, "本机没装（或没启用）「更好的自动化」"
+            return False, "本机没装（或没启用）「自动化」插件"
         if not hasattr(target, "playBanner"):
-            return False, "「更好的自动化」版本过旧，缺 playBanner 接口"
+            return False, "「自动化」版本过旧，缺 playBanner 接口"
         # 上课 / 活动期间一律不准推送：本机先判一次，再问对方插件确认一次
         if self._is_in_class():
             logger.info("[ClassSync] 上课中，拒绝远程横幅")
